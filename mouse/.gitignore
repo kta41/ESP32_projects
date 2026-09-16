@@ -1,0 +1,21 @@
+# Entorno de compilación de ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+
+# Componentes descargados (gestionados por idf_component.yml)
+managed_components/
+
+# Archivos de caché y Python
+__pycache__/
+*.py[cod]
+*~
+
+# Entornos locales de VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db

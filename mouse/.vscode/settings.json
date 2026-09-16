@@ -1,0 +1,21 @@
+{
+  "idf.currentSetup": "/home/Kta41/.espressif/v6.1/esp-idf",
+  "idf.flashType": "UART",
+  "idf.portWin": "COM4",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "/home/Kta41/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/Kta41/ESP32/mouse/build"
+  ],
+  "idf.envVars": {
+    "IDF_VER": "6.1"
+  },
+  "idf.port": "/dev/ttyACM0"
+}
