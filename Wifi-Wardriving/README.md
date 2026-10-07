@@ -48,7 +48,7 @@ idf_component_register(SRCS "main.c"
 ### 2. Build and flash
 
 ```bash
-cd Wifi-wardriving
+cd Wifi-Wardriving
 idf.py set-target esp32s3
 idf.py build flash monitor
 ```

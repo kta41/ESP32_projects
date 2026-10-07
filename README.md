@@ -18,15 +18,15 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 ## 📂 Projects Layout
 
 ```text
-├── mouse/          # USB HID Mouse Jiggler (prevent sleep / idle emulation)
-└── Wifi-wardriving/ # Wi-Fi scan and wardriving log in JSON (ESP32-S3)
+├── Mouse/           # USB HID Mouse Jiggler (prevent sleep / idle emulation)
+└── Wifi-Wardriving/ # Wi-Fi scan and wardriving log in JSON (ESP32-S3)
 ```
 
-### 1. `mouse/` — USB HID Jiggler
+### 1. `Mouse/` — USB HID Jiggler
 * **What it does:** Acts as a plug-and-play USB device that periodically sends subtle, non-intrusive cursor movements to prevent the operating system from entering idle or sleep mode.
 * **Tech stack:** ESP32-S3 Native USB capabilities (USB MSC/HID stack).
 
-### 2. `Wifi-wardriving/` — Wi-Fi Wardriving Logger
+### 2. `Wifi-Wardriving/` — Wi-Fi Wardriving Logger
 * **What it does:** Scans nearby Wi-Fi networks and saves an inventory in JSON format inside the ESP32-S3 flash memory.
 * **Tech stack:** ESP-IDF, Wi-Fi scanning in STA mode, JSON serialization, and NVS persistence.
 
@@ -63,6 +63,6 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 1. Clone the repository and navigate to the desired project directory:
    ```bash
    git clone https://github.com/tu-usuario/nombre-del-repo.git
-   cd nombre-del-repo/mouse
+   cd nombre-del-repo/Mouse
    ```
 2. Build and flash the firmware to your ESP32-S3 board using your preferred toolchain (ESP-IDF or Arduino IDE).
