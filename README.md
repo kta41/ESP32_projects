@@ -4,9 +4,9 @@
 > *A collection of embedded firmware, sensor integrations, and wireless experimentation projects powered by ESP32-S3.*
 
 <p align="center">
-  <img alt="C++" src="[https://img.shields.io/badge/C++-blue?style=flat-square&logo=cplusplus](https://img.shields.io/badge/C++-blue?style=flat-square&logo=cplusplus)">
-  <img alt="Platform: ESP32-S3" src="[https://img.shields.io/badge/Platform-ESP32--S3-orange?style=flat-square&logo=espressif](https://img.shields.io/badge/Platform-ESP32--S3-orange?style=flat-square&logo=espressif)">
-  <img alt="License: MIT" src="[https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)">
+  <img alt="C++" src="https://img.shields.io/badge/C++-blue?style=flat-square&logo=cplusplus">
+  <img alt="Platform: ESP32-S3" src="https://img.shields.io/badge/Platform-ESP32--S3-orange?style=flat-square&logo=espressif">
+  <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square">
 </p>
 
 </div>
