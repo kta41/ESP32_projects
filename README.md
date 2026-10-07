@@ -19,16 +19,16 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 
 ```text
 ├── mouse/          # USB HID Mouse Jiggler (prevent sleep / idle emulation)
-└── wardrive/       # Wi-Fi / RF sniffing and wardriving toolkit (in progress)
+└── Wifi-wardriving/ # Escaneo Wi-Fi y registro wardriving en JSON (ESP32-S3)
 ```
 
 ### 1. `mouse/` — USB HID Jiggler
 * **What it does:** Acts as a plug-and-play USB device that periodically sends subtle, non-intrusive cursor movements to prevent the operating system from entering idle or sleep mode.
 * **Tech stack:** ESP32-S3 Native USB capabilities (USB MSC/HID stack).
 
-### 2. `wardrive/` — Wireless Sniffer & Wardriving (WIP)
-* **What it does:** Designed for wireless reconnaissance, capturing AP frames, and mapping networks using custom firmware and external RF modules.
-* **Tech stack:** ESP32-S3 Wi-Fi promiscuous mode, display modules, and NRF/CC1101 integration capabilities.
+### 2. `Wifi-wardriving/` — Wi-Fi Wardriving Logger
+* **What it does:** Escanea redes Wi-Fi cercanas y guarda un inventario en formato JSON dentro de la memoria flash del ESP32-S3.
+* **Tech stack:** ESP-IDF, escaneo Wi-Fi en modo STA, serialización JSON y persistencia en NVS.
 
 ---
 
