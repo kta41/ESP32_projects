@@ -19,7 +19,7 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 
 ```text
 ├── mouse/          # USB HID Mouse Jiggler (prevent sleep / idle emulation)
-└── Wifi-wardriving/ # Escaneo Wi-Fi y registro wardriving en JSON (ESP32-S3)
+└── Wifi-wardriving/ # Wi-Fi scan and wardriving log in JSON (ESP32-S3)
 ```
 
 ### 1. `mouse/` — USB HID Jiggler
@@ -27,8 +27,8 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 * **Tech stack:** ESP32-S3 Native USB capabilities (USB MSC/HID stack).
 
 ### 2. `Wifi-wardriving/` — Wi-Fi Wardriving Logger
-* **What it does:** Escanea redes Wi-Fi cercanas y guarda un inventario en formato JSON dentro de la memoria flash del ESP32-S3.
-* **Tech stack:** ESP-IDF, escaneo Wi-Fi en modo STA, serialización JSON y persistencia en NVS.
+* **What it does:** Scans nearby Wi-Fi networks and saves an inventory in JSON format inside the ESP32-S3 flash memory.
+* **Tech stack:** ESP-IDF, Wi-Fi scanning in STA mode, JSON serialization, and NVS persistence.
 
 ---
 
