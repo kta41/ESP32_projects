@@ -18,6 +18,7 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 ## 📂 Projects Layout
 
 ```text
+├── ESP32-RF-Lab/    # 2.4 GHz spectrum occupancy & link analysis (dual nRF24 + LVGL)
 ├── Mouse/           # USB HID Mouse Jiggler (prevent sleep / idle emulation)
 └── Wifi-Wardriving/ # Wi-Fi scan and wardriving log in JSON (ESP32-S3)
 ```
@@ -29,6 +30,10 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 ### 2. `Wifi-Wardriving/` — Wi-Fi Wardriving Logger
 * **What it does:** Scans nearby Wi-Fi networks and saves an inventory in JSON format inside the ESP32-S3 flash memory.
 * **Tech stack:** ESP-IDF, Wi-Fi scanning in STA mode, JSON serialization, and NVS persistence.
+
+### 3. `ESP32-RF-Lab/` — 2.4 GHz Spectrum & Link Analyzer
+* **What it does:** Passive spectrum-occupancy scanner with dual nRF24L01+ receivers, an on-device LVGL UI, and a point-to-point packet-error-rate test between its own radios.
+* **Tech stack:** ESP-IDF, LVGL (`esp_lvgl_port`), shared SPI bus (`SPI2_HOST`), RPD-based energy detection.
 
 ---
 
