@@ -2,7 +2,7 @@
 
 Planned next projects for this workspace. Both reuse the **ESP32-RF-Lab hardware baseline**: the shared `SPI2_HOST` bus, the ST7789 240x240 display with LVGL, the four-button keypad (UP `GPIO 1` / DOWN `GPIO 2` / OK `GPIO 19` / BACK `GPIO 20`) and the MicroSD socket (`GPIO 14`).
 
-Status: `BLE-Recon` — **M1 implemented** (continuous scan → serial log). `SubGHz-Replay` — planned.
+Status: `BLE-Recon` — **M2 implemented** (iBeacon/Eddystone/FindMy parsing). `SubGHz-Replay` — planned.
 
 ---
 
