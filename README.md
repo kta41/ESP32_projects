@@ -67,7 +67,7 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 
 1. Clone the repository and navigate to the desired project directory:
    ```bash
-   git clone https://github.com/tu-usuario/nombre-del-repo.git
-   cd nombre-del-repo/Mouse
+   git clone https://github.com/kta41/ESP32_projects.git
+   cd <project>
    ```
 2. Build and flash the firmware to your ESP32-S3 board using your preferred toolchain (ESP-IDF or Arduino IDE).
