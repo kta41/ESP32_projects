@@ -1,1 +1,3 @@
+# Target del proyecto (sin secretos: los van a menuconfig → sdkconfig, ignorado)
+CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_WIFI_ENABLED=y

@@ -1,0 +1,76 @@
+menu "Wardrive (sensor sigiloso)"
+
+    config WARDRIVE_WIFI_SSID
+        string "SSID del hotspot oculto del móvil"
+        default ""
+        help
+            Nombre (SSID) del hotspot oculto WPA2 creado en el móvil.
+            Configúralo con `idf.py menuconfig`: el valor queda SOLO en
+            sdkconfig (ignorado por git) y nunca se commitea.
+
+    config WARDRIVE_WIFI_PASS
+        string "Clave WPA2 del hotspot"
+        default ""
+        help
+            Clave WPA2 del hotspot (mínimo 8 caracteres). Igual que el
+            SSID: solo en sdkconfig, nunca en el repositorio.
+
+    config WARDRIVE_LISTENER_PORT
+        int "Puerto del listener en el móvil"
+        range 1 65535
+        default 47471
+        help
+            Puerto TCP del listener Python (tools/listener.py) que corre
+            en el gateway (el móvil). [CONGELADO: 47471]
+
+    config WARDRIVE_SCAN_INTERVAL_MS
+        int "Ciclo de escaneo (ms entre inicios)"
+        range 5000 3600000
+        default 15000
+        help
+            Tiempo entre el INICIO de dos escaneos consecutivos.
+            [CONGELADO: 15000]
+
+    config WARDRIVE_MAX_APS
+        int "Tope de APs por escaneo"
+        range 1 128
+        default 128
+        help
+            Número máximo de registros de AP retenidos por escaneo.
+            [CONGELADO: 128]
+
+    config WARDRIVE_RING_SLOTS
+        int "Slots del ring buffer (escaneos crudos en RAM)"
+        range 1 32
+        default 8
+        help
+            Escaneos retenidos en RAM ante cortes de enlace (sin flash).
+            [CONGELADO: 8]
+
+    config WARDRIVE_TX_POWER
+        int "Potencia TX máxima (unidades de 0.25 dBm)"
+        range 8 84
+        default 40
+        help
+            40 = 10 dBm (mínimo práctico del ESP32-S3). Rango válido 8-84.
+            Se aplica justo después de esp_wifi_start() (ROADMAP §3.2).
+
+    config WARDRIVE_WIFI_ALL_CHANNEL_SCAN
+        bool "Fallback: escaneo completo de canales al asociar"
+        default n
+        help
+            Activa .sta.scan_method=WIFI_ALL_CHANNEL_SCAN y
+            .sort_method=WIFI_CONNECT_AP_BY_SIGNAL. Activar SOLO si la
+            asociación al SSID oculto falla con los valores por defecto
+            (ROADMAP §3.2).
+
+    config WARDRIVE_DEBUG_LEGACY_SCAN
+        bool "DEBUG: conservar el bucle de escaneo ACTIVO del baseline"
+        default n
+        help
+            Reproduce el comportamiento del baseline (escaneo activo cada
+            N ms, solo log de resumen; el NVS de datos ya está eliminado).
+            Su único propósito es la comparación A/B del Gate 2. NO es el
+            modo de operación del sensor.
+
+endmenu

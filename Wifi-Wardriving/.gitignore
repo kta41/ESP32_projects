@@ -1,0 +1,8 @@
+# Configuración local (contiene secretos vía menuconfig): NUNCA commitear
+sdkconfig
+sdkconfig.old
+
+# Artefactos de compilación ESP-IDF
+build/
+managed_components/
+dependencies.lock

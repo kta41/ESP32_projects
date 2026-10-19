@@ -1,0 +1,4 @@
+## Dependencias gestionadas (ESP-IDF v6.1): cJSON ya no está en el core.
+## Descargado a managed_components/ (ignorado por git) durante la build.
+dependencies:
+  espressif/cjson: "^1.7.19~2"

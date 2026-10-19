@@ -1,171 +1,178 @@
+/*
+ * Escáner WiFi wardriving «Nivel 3» — sensor sigiloso con push al móvil.
+ * Fase 1 (ROADMAP §4): conectividad STA sigilosa al hotspot oculto.
+ *
+ * - STA puro con credenciales de Kconfig (nunca hardcodeadas).
+ * - MAC aleatoria por sesión y TX mínimo (wifi_mgr).
+ * - Log de conexión (IP + gateway) y ping ICMP de verificación al gateway.
+ * - Sin NVS de datos: el almacén pasa a ser el móvil (Fases 3-4).
+ */
+
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include "cJSON.h"
-#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_timer.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs.h"
+#include "lwip/ip_addr.h"
 #include "nvs_flash.h"
+#include "ping/ping_sock.h"
 
-#define TAG "WIFI_WARDRIVE"
+#include "wifi_mgr.h"
 
-#define MAX_SCAN_RESULTS 64
-#define SCAN_INTERVAL_MS 15000
+#if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
+#include <stdlib.h>
 
-#define NVS_NAMESPACE "wardrive"
-#define NVS_KEY_LAST_SCAN "last_scan_json"
+#include "esp_wifi.h"
+#include "jsonl_writer.h"
+#endif
 
-static const char *authmode_to_str(wifi_auth_mode_t authmode)
+static const char *TAG = "WARDRIVE_MAIN";
+
+/* ------------------------------------------------------------------ */
+/* Ping de verificación al gateway (Gate 1)                            */
+/* ------------------------------------------------------------------ */
+
+static void ping_exito(esp_ping_handle_t hdl, void *args)
 {
-    switch (authmode) {
-        case WIFI_AUTH_OPEN:
-            return "OPEN";
-        case WIFI_AUTH_WEP:
-            return "WEP";
-        case WIFI_AUTH_WPA_PSK:
-            return "WPA_PSK";
-        case WIFI_AUTH_WPA2_PSK:
-            return "WPA2_PSK";
-        case WIFI_AUTH_WPA_WPA2_PSK:
-            return "WPA_WPA2_PSK";
-        case WIFI_AUTH_WPA2_ENTERPRISE:
-            return "WPA2_ENTERPRISE";
-        case WIFI_AUTH_WPA3_PSK:
-            return "WPA3_PSK";
-        case WIFI_AUTH_WPA2_WPA3_PSK:
-            return "WPA2_WPA3_PSK";
-        case WIFI_AUTH_WAPI_PSK:
-            return "WAPI_PSK";
-        default:
-            return "UNKNOWN";
-    }
+    uint8_t ttl = 0;
+    uint32_t ms = 0;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TTL, &ttl, sizeof(ttl));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &ms, sizeof(ms));
+    ESP_LOGI(TAG, "ping al gateway OK (ttl=%u, tiempo=%lu ms)", ttl, (unsigned long)ms);
 }
 
-static void bssid_to_str(const uint8_t bssid[6], char *out, size_t out_len)
+static void ping_timeout(esp_ping_handle_t hdl, void *args)
 {
-    if (out_len < 18) {
+    ESP_LOGW(TAG, "ping al gateway: sin respuesta (timeout)");
+}
+
+static void ping_fin(esp_ping_handle_t hdl, void *args)
+{
+    uint32_t enviados = 0;
+    uint32_t recibidos = 0;
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REQUEST, &enviados, sizeof(enviados));
+    esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &recibidos, sizeof(recibidos));
+    ESP_LOGI(TAG, "ping al gateway terminado: %lu/%lu respuestas",
+             (unsigned long)recibidos, (unsigned long)enviados);
+    /* Liberar recursos (patrón del ejemplo oficial icmp_echo). */
+    esp_ping_delete_session(hdl);
+}
+
+static void lanzar_ping_al_gateway(void)
+{
+    esp_ip4_addr_t gw;
+    if (!wifi_mgr_get_gateway_ip(&gw)) {
         return;
     }
-    snprintf(out, out_len, "%02X:%02X:%02X:%02X:%02X:%02X",
-             bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
-}
 
-static esp_err_t save_json_to_flash(const char *json_payload)
-{
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    ESP_RETURN_ON_ERROR(err, TAG, "No se pudo abrir NVS");
+    char gw_str[IP4ADDR_STRLEN_MAX];
+    snprintf(gw_str, sizeof(gw_str), IPSTR, IP2STR(&gw));
 
-    size_t payload_len = strlen(json_payload) + 1;
-    err = nvs_set_blob(nvs_handle, NVS_KEY_LAST_SCAN, json_payload, payload_len);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs_handle);
+    ip_addr_t destino;
+    if (ipaddr_aton(gw_str, &destino) == 0) {
+        ESP_LOGE(TAG, "Gateway no parseable: %s", gw_str);
+        return;
     }
 
-    nvs_close(nvs_handle);
-    ESP_RETURN_ON_ERROR(err, TAG, "Error guardando JSON en NVS");
-    return ESP_OK;
-}
+    esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+    cfg.count = 4;
+    cfg.interval_ms = 500;
+    cfg.timeout_ms = 1000;
+    cfg.target_addr = destino;
 
-static char *build_scan_json(const wifi_ap_record_t *records, uint16_t count, uint16_t total_detected)
-{
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) {
-        return NULL;
-    }
-
-    cJSON_AddNumberToObject(root, "timestamp_us", (double)esp_timer_get_time());
-    cJSON_AddNumberToObject(root, "total_detected", total_detected);
-    cJSON_AddNumberToObject(root, "stored_results", count);
-
-    cJSON *devices = cJSON_AddArrayToObject(root, "devices");
-    if (devices == NULL) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    for (uint16_t i = 0; i < count; i++) {
-        const wifi_ap_record_t *ap = &records[i];
-        cJSON *device = cJSON_CreateObject();
-        if (device == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
-
-        char bssid[18] = {0};
-        bssid_to_str(ap->bssid, bssid, sizeof(bssid));
-
-        cJSON_AddStringToObject(device, "ssid", (const char *)ap->ssid);
-        cJSON_AddStringToObject(device, "bssid", bssid);
-        cJSON_AddNumberToObject(device, "rssi", ap->rssi);
-        cJSON_AddNumberToObject(device, "primary_channel", ap->primary);
-        cJSON_AddNumberToObject(device, "secondary_channel", ap->second);
-        cJSON_AddStringToObject(device, "auth_mode", authmode_to_str(ap->authmode));
-        cJSON_AddNumberToObject(device, "pairwise_cipher", ap->pairwise_cipher);
-        cJSON_AddNumberToObject(device, "group_cipher", ap->group_cipher);
-        cJSON_AddNumberToObject(device, "antenna", ap->ant);
-
-        cJSON_AddItemToArray(devices, device);
-    }
-
-    char *json_payload = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return json_payload;
-}
-
-static void scan_wifi_and_store(void)
-{
-    wifi_scan_config_t scan_cfg = {
-        .show_hidden = true
+    static const esp_ping_callbacks_t cbs = {
+        .on_ping_success = ping_exito,
+        .on_ping_timeout = ping_timeout,
+        .on_ping_end = ping_fin,
     };
 
-    ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_cfg, true));
-
-    uint16_t ap_count = 0;
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
-
-    uint16_t results_to_store = ap_count > MAX_SCAN_RESULTS ? MAX_SCAN_RESULTS : ap_count;
-    wifi_ap_record_t *records = NULL;
-
-    if (results_to_store > 0) {
-        records = calloc(results_to_store, sizeof(wifi_ap_record_t));
-        if (records == NULL) {
-            ESP_LOGE(TAG, "No hay memoria para resultados de escaneo");
-            return;
-        }
-
-        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&results_to_store, records));
-    }
-
-    char *json_payload = build_scan_json(records, results_to_store, ap_count);
-    if (json_payload == NULL) {
-        ESP_LOGE(TAG, "No se pudo construir JSON del escaneo");
-        free(records);
+    esp_ping_handle_t ping = NULL;
+    esp_err_t err = esp_ping_new_session(&cfg, &cbs, &ping);
+    if (err != ESP_OK || ping == NULL) {
+        ESP_LOGE(TAG, "No se pudo crear la sesión de ping: %s", esp_err_to_name(err));
         return;
     }
-
-    esp_err_t err = save_json_to_flash(json_payload);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Escaneo guardado: detectados=%u, almacenados=%u, bytes=%u",
-                 ap_count, results_to_store, (unsigned)strlen(json_payload));
-    } else {
-        ESP_LOGE(TAG, "Fallo al guardar escaneo en flash: %s", esp_err_to_name(err));
-    }
-
-    free(json_payload);
-    free(records);
+    ESP_LOGI(TAG, "Ping de verificación al gateway %s...", gw_str);
+    esp_ping_start(ping);
 }
+
+/* Evento GOT_IP: log de conexión del Gate 1 + ping (una vez por arranque). */
+static void manejador_got_ip(void *arg, esp_event_base_t base, int32_t id, void *datos)
+{
+    static bool primera_vez = true;
+    if (base != IP_EVENT || id != IP_EVENT_STA_GOT_IP || !primera_vez) {
+        return;
+    }
+    primera_vez = false;
+
+    const ip_event_got_ip_t *evt = (const ip_event_got_ip_t *)datos;
+    ESP_LOGI(TAG, "=== GATE 1 | Conectado al hotspot: IP=" IPSTR ", gateway=" IPSTR " ===",
+             IP2STR(&evt->ip_info.ip), IP2STR(&evt->ip_info.gw));
+    lanzar_ping_al_gateway();
+}
+
+#if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
+/*
+ * Modo DEBUG: bucle de escaneo ACTIVO del baseline, para el A/B del Gate 2.
+ * El guardado en NVS está eliminado (Fase 1): solo se loggea el resumen.
+ */
+static void tarea_escaneo_legacy(void *pv)
+{
+    ESP_LOGW(TAG, "[LEGACY] escaneo ACTIVO cada %d ms (solo para A/B del Gate 2)",
+             CONFIG_WARDRIVE_SCAN_INTERVAL_MS);
+
+    while (true) {
+        wifi_scan_config_t cfg = {
+            .show_hidden = true,
+        };
+        esp_err_t err = esp_wifi_scan_start(&cfg, true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "[LEGACY] scan_start: %s", esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_WARDRIVE_SCAN_INTERVAL_MS));
+            continue;
+        }
+
+        uint16_t total = 0;
+        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&total));
+        uint16_t a_guardar = (total > CONFIG_WARDRIVE_MAX_APS)
+                                 ? (uint16_t)CONFIG_WARDRIVE_MAX_APS
+                                 : total;
+
+        wifi_ap_record_t *registros = NULL;
+        if (a_guardar > 0) {
+            registros = calloc(a_guardar, sizeof(wifi_ap_record_t));
+        }
+        if (a_guardar > 0 && registros == NULL) {
+            ESP_LOGE(TAG, "[LEGACY] sin memoria para %u registros", a_guardar);
+        } else {
+            if (registros != NULL) {
+                ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&a_guardar, registros));
+            }
+            char *json = build_scan_json(registros, a_guardar, total);
+            if (json != NULL) {
+                ESP_LOGI(TAG, "[LEGACY] Escaneo: detectados=%u almacenados=%u bytes=%u",
+                         total, a_guardar, (unsigned)strlen(json));
+                ESP_LOGD(TAG, "[LEGACY] JSON: %s", json);
+                free(json);
+            } else {
+                ESP_LOGE(TAG, "[LEGACY] no se pudo construir el JSON");
+            }
+            free(registros);
+        }
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_WARDRIVE_SCAN_INTERVAL_MS));
+    }
+}
+#endif /* CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN */
 
 void app_main(void)
 {
+    /* NVS: lo requiere el driver WiFi (§3.2). Sin blobs de datos: eliminados. */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -175,17 +182,20 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    /* Log del Gate 1 (IP + gateway) y ping de verificación al recibir IP. */
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               manejador_got_ip, NULL));
 
-    ESP_LOGI(TAG, "Iniciando wardriving Wi-Fi (escaneo cada %d ms)", SCAN_INTERVAL_MS);
+    /* STA sigiloso: MAC aleatoria de sesión, TX mínimo y eventos (§3.2). */
+    ESP_ERROR_CHECK(wifi_mgr_init());
 
-    while (true) {
-        scan_wifi_and_store();
-        vTaskDelay(pdMS_TO_TICKS(SCAN_INTERVAL_MS));
-    }
+#if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
+    xTaskCreate(tarea_escaneo_legacy, "scan_legacy", 4096, NULL, 5, NULL);
+#else
+    ESP_LOGI(TAG, "Fase 1 operativa: asociando al hotspot oculto "
+                  "(el escaneo pasivo llega en la Fase 2)");
+#endif
+
+    /* app_main queda como init + arranque de tasks: sin bucles aquí. */
 }
