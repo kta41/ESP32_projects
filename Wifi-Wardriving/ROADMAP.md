@@ -231,11 +231,11 @@ Reglas de serialización por dispositivo:
 
 ### Fase 2 — Escaneo pasivo y payload v1
 
-- [ ] Task dedicado de escaneo (`xTaskCreate`), ciclo de 15 s entre inicios (3.3).
-- [ ] Escaneo pasivo con dwell ~300 ms/canal; medición real de `scan_duration_ms`.
-- [ ] Filtrado del BSSID asociado.
-- [ ] `jsonl_writer`: payload v1 completo (3.5) con sanitización SSID y todos los mapeos.
-- [ ] Log de resumen por escaneo (sin volcar el JSON entero por serial salvo con flag DEBUG).
+- [x] Task dedicado de escaneo (`xTaskCreate`), ciclo de 15 s entre inicios (3.3).
+- [x] Escaneo pasivo con dwell ~300 ms/canal; medición real de `scan_duration_ms`.
+- [x] Filtrado del BSSID asociado.
+- [x] `jsonl_writer`: payload v1 completo (3.5) con sanitización SSID y todos los mapeos. *(Nota v6.1: `WIFI_AUTH_WPA3_EXT_PSK`/`_MIXED_MODE` ya no existen y `WIFI_AUTH_ENTERPRISE` es alias de `WIFI_AUTH_WPA2_ENTERPRISE`; mapeados todos los enums reales de v6.1 + fallback `UNKNOWN_%d`.)*
+- [x] Log de resumen por escaneo (sin volcar el JSON entero por serial salvo con flag DEBUG). *(flag `WARDRIVE_DEBUG_DUMP_JSON`, default apagado.)*
 
 **Gate 2:** A/B en el mismo punto contra el escaneo activo del baseline (recuento comparable, sin probes propios verificables) y JSON validado con `validate.py` o jq.
 

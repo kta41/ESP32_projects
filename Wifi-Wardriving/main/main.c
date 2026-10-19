@@ -23,6 +23,8 @@
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
 
+#include "scanner.h"
+#include "session.h"
 #include "wifi_mgr.h"
 
 #if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
@@ -190,11 +192,17 @@ void app_main(void)
     /* STA sigiloso: MAC aleatoria de sesión, TX mínimo y eventos (§3.2). */
     ESP_ERROR_CHECK(wifi_mgr_init());
 
+    /* Identidad de sesión (§3.4): session_id aleatorio por arranque. */
+    session_init();
+
 #if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
     xTaskCreate(tarea_escaneo_legacy, "scan_legacy", 4096, NULL, 5, NULL);
 #else
-    ESP_LOGI(TAG, "Fase 1 operativa: asociando al hotspot oculto "
-                  "(el escaneo pasivo llega en la Fase 2)");
+    /* Task de escaneo pasivo (§3.3): todo el trabajo vive en tasks. */
+    ESP_ERROR_CHECK(scanner_start());
+    ESP_LOGI(TAG, "Fase 2 operativa: escaneo pasivo cada %d ms "
+                  "(el push al gateway llega en la Fase 3)",
+             CONFIG_WARDRIVE_SCAN_INTERVAL_MS);
 #endif
 
     /* app_main queda como init + arranque de tasks: sin bucles aquí. */

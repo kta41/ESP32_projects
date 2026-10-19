@@ -73,4 +73,13 @@ menu "Wardrive (sensor sigiloso)"
             Su único propósito es la comparación A/B del Gate 2. NO es el
             modo de operación del sensor.
 
+    config WARDRIVE_DEBUG_DUMP_JSON
+        bool "DEBUG: volcar el JSONL completo de cada escaneo"
+        default n
+        help
+            Imprime por serial la línea JSON completa de cada escaneo.
+            Necesario para validar el payload v1 en el Gate 2 (copiar la
+            línea y pasarla por jq o validate.py). NO activar en
+            producción: genera un log masivo.
+
 endmenu
