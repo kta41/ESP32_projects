@@ -198,11 +198,10 @@ void app_main(void)
 #if CONFIG_WARDRIVE_DEBUG_LEGACY_SCAN
     xTaskCreate(tarea_escaneo_legacy, "scan_legacy", 4096, NULL, 5, NULL);
 #else
-    /* Task de escaneo pasivo (§3.3): todo el trabajo vive en tasks. */
+    /* Task de escaneo pasivo + push (§3.3, §3.6, §3.7): todo el trabajo vive en tasks. */
     ESP_ERROR_CHECK(scanner_start());
-    ESP_LOGI(TAG, "Fase 2 operativa: escaneo pasivo cada %d ms "
-                  "(el push al gateway llega en la Fase 3)",
-             CONFIG_WARDRIVE_SCAN_INTERVAL_MS);
+    ESP_LOGI(TAG, "Sensor operativo: escaneo pasivo cada %d ms + push a gateway:%d",
+             CONFIG_WARDRIVE_SCAN_INTERVAL_MS, CONFIG_WARDRIVE_LISTENER_PORT);
 #endif
 
     /* app_main queda como init + arranque de tasks: sin bucles aquí. */

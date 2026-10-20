@@ -23,6 +23,10 @@ static const char *TAG = "WIFI_MGR";
 #define REINTENTO_CONEXION_MS 5000
 
 static volatile bool s_conectado = false;
+static volatile bool s_conectando = false;
+static volatile bool s_escaneando = false;
+static volatile bool s_hay_bssid_propio = false;
+static uint8_t s_bssid_propio[6] = {0};
 static esp_ip4_addr_t s_ip_propia;
 static esp_ip4_addr_t s_gateway;
 static TimerHandle_t s_timer_reintento = NULL;
@@ -30,7 +34,11 @@ static TimerHandle_t s_timer_reintento = NULL;
 /* Reintento diferido: lo dispara el timer, no el handler de eventos. */
 static void cb_reintento(TimerHandle_t timer)
 {
+    if (s_escaneando || s_conectado) {
+        return;
+    }
     ESP_LOGI(TAG, "Reintentando asociación al hotspot...");
+    s_conectando = true;
     /* El resultado (éxito o nuevo fallo) llega por eventos. */
     esp_wifi_connect();
 }
@@ -39,23 +47,32 @@ static void manejador_eventos(void *arg, esp_event_base_t base, int32_t id, void
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Interfaz STA iniciada, asociando al hotspot oculto...");
+        s_conectando = true;
         esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        const wifi_event_sta_connected_t *evt = (const wifi_event_sta_connected_t *)datos;
+        if (evt != NULL) {
+            memcpy(s_bssid_propio, evt->bssid, 6);
+            s_hay_bssid_propio = true;
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *evt = (const wifi_event_sta_disconnected_t *)datos;
         s_conectado = false;
-        ESP_LOGW(TAG, "Desconectado (razón %d); reintento en %d ms",
-                 evt ? evt->reason : -1, REINTENTO_CONEXION_MS);
-        if (s_timer_reintento != NULL) {
-            /* One-shot de 5 s: no bloquea el handler (§3.2).
-             * Re-armarlo si ya estaba activo solo aplaza el disparo, lo que
-             * mantiene el límite de 1 reintento cada 5 s. */
-            xTimerStart(s_timer_reintento, 0);
+        s_conectando = false;
+        if (!s_escaneando) {
+            ESP_LOGW(TAG, "Desconectado (razón %d); reintento en %d ms",
+                     evt ? evt->reason : -1, REINTENTO_CONEXION_MS);
+            if (s_timer_reintento != NULL) {
+                /* One-shot de 5 s: no bloquea el handler (§3.2). */
+                xTimerStart(s_timer_reintento, 0);
+            }
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *evt = (const ip_event_got_ip_t *)datos;
         s_ip_propia = evt->ip_info.ip;
         s_gateway = evt->ip_info.gw;
         s_conectado = true;
+        s_conectando = false;
         if (s_timer_reintento != NULL) {
             xTimerStop(s_timer_reintento, 0);
         }
@@ -98,12 +115,10 @@ esp_err_t wifi_mgr_init(void)
     wifi_config_t wifi_cfg = { 0 };
     strlcpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
     strlcpy((char *)wifi_cfg.sta.password, clave, sizeof(wifi_cfg.sta.password));
-#if CONFIG_WARDRIVE_WIFI_ALL_CHANNEL_SCAN
-    /* Fallback §3.2: solo si la asociación al SSID oculto falla con defaults. */
+    /* Escaneo activo de todos los canales al asociar para encontrar SSID oculto a la primera. */
     wifi_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     wifi_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-    ESP_LOGI(TAG, "Fallback activo: escaneo de todos los canales al asociar");
-#endif
+    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG,
                         "No se pudo fijar WIFI_MODE_STA (único modo permitido)");
@@ -144,6 +159,26 @@ bool wifi_mgr_is_connected(void)
     return s_conectado;
 }
 
+void wifi_mgr_pause_connect_for_scan(void)
+{
+    s_escaneando = true;
+    if (s_timer_reintento != NULL) {
+        xTimerStop(s_timer_reintento, 0);
+    }
+    if (!s_conectado && s_conectando) {
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+void wifi_mgr_resume_connect_after_scan(void)
+{
+    s_escaneando = false;
+    if (!s_conectado && !s_conectando && s_timer_reintento != NULL) {
+        xTimerStart(s_timer_reintento, 0);
+    }
+}
+
 bool wifi_mgr_get_gateway_ip(esp_ip4_addr_t *out_gateway)
 {
     if (!s_conectado || out_gateway == NULL) {
@@ -159,5 +194,14 @@ bool wifi_mgr_get_own_ip(esp_ip4_addr_t *out_ip)
         return false;
     }
     *out_ip = s_ip_propia;
+    return true;
+}
+
+bool wifi_mgr_get_hotspot_bssid(uint8_t out_bssid[6])
+{
+    if (!s_hay_bssid_propio || out_bssid == NULL) {
+        return false;
+    }
+    memcpy(out_bssid, s_bssid_propio, 6);
     return true;
 }

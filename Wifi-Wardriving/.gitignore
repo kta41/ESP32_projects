@@ -1,6 +1,9 @@
 # Configuración local (contiene secretos vía menuconfig): NUNCA commitear
 sdkconfig
 sdkconfig.old
+ROADMAP.md
+wardrive_data/
+*.jsonl
 
 # Artefactos de compilación ESP-IDF
 build/

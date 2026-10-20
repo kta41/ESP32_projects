@@ -1,0 +1,2 @@
+#!/data/data/com.termux/files/usr/bin/bash
+exec nh "python3 /home/Kta41/wardrive/warmap.py \"\$@\""

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -19,7 +20,10 @@
 #include "freertos/task.h"
 
 #include "jsonl_writer.h"
+#include "pusher.h"
+#include "scan_store.h"
 #include "session.h"
+#include "wifi_mgr.h"
 
 static const char *TAG = "SCANNER";
 
@@ -47,7 +51,9 @@ static bool escanear_pasivo(scan_result_t *res)
     };
 
     int64_t t_inicio = esp_timer_get_time();
+    wifi_mgr_pause_connect_for_scan();
     esp_err_t err = esp_wifi_scan_start(&cfg, true); /* bloqueante (§3.3) */
+    wifi_mgr_resume_connect_after_scan();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Escaneo no iniciado (scan_start: %s)", esp_err_to_name(err));
         return false;
@@ -70,15 +76,27 @@ static bool escanear_pasivo(scan_result_t *res)
         return false;
     }
 
-    /* Filtrado del BSSID asociado (§3.3): el hotspot del móvil no aparece. */
+    /* Filtrado total del hotspot propio (§3.3): ni su BSSID ni su SSID aparecen jamás. */
     wifi_ap_record_t ap_propio;
-    bool hay_propio = (esp_wifi_sta_get_ap_info(&ap_propio) == ESP_OK);
+    bool hay_propio_actual = (esp_wifi_sta_get_ap_info(&ap_propio) == ESP_OK);
+    uint8_t bssid_recordado[6] = {0};
+    bool hay_propio_recordado = wifi_mgr_get_hotspot_bssid(bssid_recordado);
+    const char *ssid_propio = CONFIG_WARDRIVE_WIFI_SSID;
 
     uint16_t almacenados = 0;
-    bool propio_filtrado = false;
+    uint16_t propios_filtrados = 0;
     for (uint16_t i = 0; i < leidos; i++) {
-        if (hay_propio && memcmp(res->records[i].bssid, ap_propio.bssid, 6) == 0) {
-            propio_filtrado = true;
+        bool es_propio = false;
+        if (hay_propio_actual && memcmp(res->records[i].bssid, ap_propio.bssid, 6) == 0) {
+            es_propio = true;
+        } else if (hay_propio_recordado && memcmp(res->records[i].bssid, bssid_recordado, 6) == 0) {
+            es_propio = true;
+        } else if (ssid_propio[0] != '\0' &&
+                   strncmp((const char *)res->records[i].ssid, ssid_propio, 32) == 0) {
+            es_propio = true;
+        }
+        if (es_propio) {
+            propios_filtrados++;
             continue;
         }
         if (almacenados != i) {
@@ -87,7 +105,7 @@ static bool escanear_pasivo(scan_result_t *res)
         almacenados++;
     }
 
-    res->total_detected = ap_num - (propio_filtrado ? 1 : 0);
+    res->total_detected = (ap_num >= propios_filtrados) ? (ap_num - propios_filtrados) : 0;
     res->num_records = almacenados;
     res->stored = almacenados;
     res->dropped = (uint16_t)(res->total_detected > almacenados
@@ -110,35 +128,44 @@ static void tarea_escaneo(void *pv)
     for (;;) {
         memset(&s_result, 0, sizeof(s_result));
         if (escanear_pasivo(&s_result)) {
-            /* Log de resumen por escaneo (formato §3.7; el tramo de push
-             * llega en la Fase 3). */
-            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes (%" PRIu32 ".%" PRIu32 " s)",
-                     s_result.scan_id, s_result.stored,
-                     s_result.duration_ms / 1000, (s_result.duration_ms % 1000) / 100);
+            /* Encolar en el ring buffer crudo (§3.6). */
+            scan_store_push(&s_result);
 
-            /* Serializar cada ciclo: prueba de humo del payload v1 y del
-             * heap (Gate 2). En la Fase 3 la serialización se moverá al
-             * momento del push (§3.6). */
-            char *linea = build_scan_json_v1(&s_result, session_get_id());
-            if (linea == NULL) {
-                ESP_LOGE(TAG, "Sin memoria para el JSON del escaneo #%" PRIu32,
-                         s_result.scan_id);
-            } else {
 #if CONFIG_WARDRIVE_DEBUG_DUMP_JSON
+            char *linea = build_scan_json_v1(&s_result, session_get_id());
+            if (linea != NULL) {
                 ESP_LOGI(TAG, "JSONL: %s", linea);
-#endif
                 free(linea);
             }
+#endif
+
+            /* Drenar el ring hacia el gateway en lotes de hasta 4 (§3.7). */
+            push_report_t rep = pusher_flush_pending();
+
+            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes (%" PRIu32 ".%" PRIu32 " s) | "
+                          "push: %s (%u bytes, %u pendientes) | heap=%lu B",
+                     s_result.scan_id, s_result.stored,
+                     s_result.duration_ms / 1000, (s_result.duration_ms % 1000) / 100,
+                     pusher_status_str(rep.status),
+                     (unsigned)rep.bytes_sent, (unsigned)rep.pending_after,
+                     (unsigned long)esp_get_free_heap_size());
         }
 
-        /* Periodo entre INICIOS (§2): absorbe los ~4-5 s del escaneo. */
-        vTaskDelayUntil(&proximo_inicio,
-                        pdMS_TO_TICKS(CONFIG_WARDRIVE_SCAN_INTERVAL_MS));
+        /* Periodo entre INICIOS (§2): absorbe el escaneo + intento de push;
+         * si el ciclo superó los 15 s por reintentos, arranca el siguiente sin solapar. */
+        TickType_t ahora = xTaskGetTickCount();
+        TickType_t intervalo = pdMS_TO_TICKS(CONFIG_WARDRIVE_SCAN_INTERVAL_MS);
+        if ((ahora - proximo_inicio) >= intervalo) {
+            proximo_inicio = ahora;
+        } else {
+            vTaskDelayUntil(&proximo_inicio, intervalo);
+        }
     }
 }
 
 esp_err_t scanner_start(void)
 {
-    BaseType_t ok = xTaskCreate(tarea_escaneo, "scanner", 4096, NULL, 5, NULL);
+    scan_store_init();
+    BaseType_t ok = xTaskCreate(tarea_escaneo, "scanner", 8192, NULL, 5, NULL);
     return (ok == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }
