@@ -241,6 +241,70 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
         }
     }
 
+    if (res->promisc.enabled) {
+        cJSON *prom = cJSON_AddObjectToObject(root, "promisc");
+        if (prom == NULL) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+        cJSON_AddNumberToObject(prom, "mgmt_frames", (double)res->promisc.mgmt_frames);
+        cJSON_AddNumberToObject(prom, "data_frames", (double)res->promisc.data_frames);
+        cJSON_AddNumberToObject(prom, "probe_req_frames", (double)res->promisc.probe_req_frames);
+        cJSON_AddNumberToObject(prom, "deauth_frames", (double)res->promisc.deauth_frames);
+
+        cJSON *probes_arr = cJSON_AddArrayToObject(prom, "probes");
+        cJSON *clients_arr = cJSON_AddArrayToObject(prom, "clients");
+        if (probes_arr == NULL || clients_arr == NULL) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+
+        for (uint16_t i = 0; i < res->promisc.num_probes; i++) {
+            const promisc_probe_t *pr = &res->promisc.probes[i];
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) {
+                cJSON_Delete(root);
+                return NULL;
+            }
+            char mac_str[18] = {0};
+            bssid_to_str(pr->sta_mac, mac_str, sizeof(mac_str));
+            char ssid_limpio[33];
+            char ssid_hex[65];
+            size_t longitud = 0;
+            bool sustituido = sanitizar_ssid(pr->ssid, ssid_limpio, ssid_hex, &longitud);
+
+            cJSON_AddStringToObject(item, "sta_mac", mac_str);
+            cJSON_AddStringToObject(item, "ssid", ssid_limpio);
+            if (sustituido) {
+                cJSON_AddStringToObject(item, "ssid_hex", ssid_hex);
+            }
+            cJSON_AddNumberToObject(item, "rssi", pr->rssi);
+            cJSON_AddNumberToObject(item, "channel", pr->channel);
+            cJSON_AddNumberToObject(item, "count", pr->count);
+            cJSON_AddItemToArray(probes_arr, item);
+        }
+
+        for (uint16_t i = 0; i < res->promisc.num_clients; i++) {
+            const promisc_client_t *cl = &res->promisc.clients[i];
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) {
+                cJSON_Delete(root);
+                return NULL;
+            }
+            char sta_str[18] = {0};
+            char bssid_str[18] = {0};
+            bssid_to_str(cl->sta_mac, sta_str, sizeof(sta_str));
+            bssid_to_str(cl->bssid, bssid_str, sizeof(bssid_str));
+
+            cJSON_AddStringToObject(item, "sta_mac", sta_str);
+            cJSON_AddStringToObject(item, "bssid", bssid_str);
+            cJSON_AddNumberToObject(item, "rssi", cl->rssi);
+            cJSON_AddNumberToObject(item, "channel", cl->channel);
+            cJSON_AddNumberToObject(item, "frames", cl->frames);
+            cJSON_AddItemToArray(clients_arr, item);
+        }
+    }
+
     char *linea = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return linea;

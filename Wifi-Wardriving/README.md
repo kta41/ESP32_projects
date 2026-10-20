@@ -11,9 +11,10 @@ Sensor de reconocimiento Wi-Fi pasivo en **ESP-IDF v6.1** para **ESP32-S3** que 
    - Aplica potencia de transmisión reducida (`CONFIG_WARDRIVE_TX_POWER`, por defecto `40` = 10 dBm).
    - Escaneo activo de todos los canales en el momento de asociar (`WIFI_ALL_CHANNEL_SCAN`) para soportar **SSID oculto** en el hotspot.
    - Reconexión automática con rate-limit de 5 s mediante timer FreeRTOS y coordinación con el escáner para no bloquear `esp_wifi_scan_start()`.
-2. **Escáner pasivo con exclusión total del hotspot propio (`main/scanner.c`)**:
+2. **Escáner pasivo + Sniffer Promiscuo 802.11 (`main/scanner.c`, `main/promisc.c`)**:
    - Ciclo estricto de 15 s entre inicios (`vTaskDelayUntil`) con `WIFI_SCAN_TYPE_PASSIVE` y dwell de 300 ms/canal (0 tramas de probe emitidas durante el barrido).
-   - **Triple filtro de identidad**: excluye automáticamente el BSSID asociado actual, el último BSSID recordado del hotspot en la sesión y el `CONFIG_WARDRIVE_WIFI_SSID` para que el punto de acceso propio nunca aparezca en el JSONL.
+   - **Modo promiscuo simultáneo (`WIFI_PKT_MGMT | WIFI_PKT_DATA`)**: captura en tiempo real estaciones clientes asociadas a cada AP (tramas de datos `ToDS`/`FromDS`), peticiones `Probe Request` con los SSIDs buscados por dispositivos cercanos y contadores de tramas `Deauth`/`Disassoc`.
+   - **Triple filtro de identidad**: excluye automáticamente la MAC propia del ESP32, el BSSID asociado actual, el último BSSID recordado del hotspot en la sesión y el `CONFIG_WARDRIVE_WIFI_SSID` tanto de la lista de APs como de los clientes y probes promiscuos.
 3. **Ring buffer en RAM (`main/scan_store.c`)**:
    - Preasigna `CONFIG_WARDRIVE_RING_SLOTS` (8 slots × 128 APs crudos en BSS) sin escribir capturas en flash.
    - Si el enlace cae durante varios ciclos y el buffer se llena, descarta el escaneo más antiguo e incrementa el contador acumulado `lost_before`.
@@ -84,10 +85,12 @@ Para desplegar o actualizar las herramientas en el teléfono por USB (ADB + SSH 
 Comandos disponibles directamente en Termux o dentro de Kali (`nh`):
 
 ```bash
-warwifi                  # Inicia el listener en vivo en 0.0.0.0:47471 (con wake-lock)
-warmap                   # Muestra el informe de auditoría de todos los .jsonl capturados
-warmap --csv redes.csv   # Exporta el catálogo único de BSSIDs a CSV
-warcheck                 # Valida la integridad y continuidad de todos los .jsonl
+warwifi                        # Inicia el listener en vivo en 0.0.0.0:47471 (con wake-lock)
+warmap                         # Muestra el informe de auditoría (APs + Clientes + Probes)
+warmap --csv redes.csv         # Exporta el catálogo único de BSSIDs a CSV
+warmap --wigle wigle.csv       # Exporta en formato oficial WiGLE CSV v1.4
+warmap --html dashboard.html   # Genera un dashboard interactivo offline en HTML
+warcheck                       # Valida la integridad y continuidad de todos los .jsonl
 ```
 
 ---

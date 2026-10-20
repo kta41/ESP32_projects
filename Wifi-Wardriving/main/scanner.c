@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 
 #include "jsonl_writer.h"
+#include "promisc.h"
 #include "pusher.h"
 #include "scan_store.h"
 #include "session.h"
@@ -113,6 +114,7 @@ static bool escanear_pasivo(scan_result_t *res)
                                   : 0);
     res->lost_before = 0;   /* Fase 3: ring buffer */
     res->buffered = false;  /* Fase 3: push */
+    promisc_collect_and_reset(&res->promisc);
 
     res->scan_id = session_next_scan_id();
     return true;
@@ -142,9 +144,11 @@ static void tarea_escaneo(void *pv)
             /* Drenar el ring hacia el gateway en lotes de hasta 4 (§3.7). */
             push_report_t rep = pusher_flush_pending();
 
-            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes (%" PRIu32 ".%" PRIu32 " s) | "
+            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes, %u clientes, %u probes, %" PRIu32 " deauth (%" PRIu32 ".%" PRIu32 " s) | "
                           "push: %s (%u bytes, %u pendientes) | heap=%lu B",
                      s_result.scan_id, s_result.stored,
+                     s_result.promisc.num_clients, s_result.promisc.num_probes,
+                     s_result.promisc.deauth_frames,
                      s_result.duration_ms / 1000, (s_result.duration_ms % 1000) / 100,
                      pusher_status_str(rep.status),
                      (unsigned)rep.bytes_sent, (unsigned)rep.pending_after,
@@ -166,6 +170,7 @@ static void tarea_escaneo(void *pv)
 esp_err_t scanner_start(void)
 {
     scan_store_init();
+    promisc_init();
     BaseType_t ok = xTaskCreate(tarea_escaneo, "scanner", 8192, NULL, 5, NULL);
     return (ok == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }

@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 from listener import ListenerState, make_handler
 from validate import validate_file
+import warmap
 
 
 def make_scan(scan_id=1, session_id="9f3a21c4", lost_before=0, buffered=False):
@@ -41,6 +42,30 @@ def make_scan(scan_id=1, session_id="9f3a21c4", lost_before=0, buffered=False):
                 "hidden": False,
             }
         ],
+        "promisc": {
+            "mgmt_frames": 42,
+            "data_frames": 18,
+            "probe_req_frames": 5,
+            "deauth_frames": 0,
+            "probes": [
+                {
+                    "sta_mac": "12:34:56:78:9A:BC",
+                    "ssid": "CorpWiFi",
+                    "rssi": -64,
+                    "channel": 6,
+                    "count": 3,
+                }
+            ],
+            "clients": [
+                {
+                    "sta_mac": "DE:AD:BE:EF:00:01",
+                    "bssid": "AA:BB:CC:DD:EE:FF",
+                    "rssi": -52,
+                    "channel": 6,
+                    "frames": 9,
+                }
+            ],
+        },
     }
 
 
@@ -93,6 +118,19 @@ class ListenerAndValidatorTests(unittest.TestCase):
         errors, summary = validate_file(files[0])
         self.assertEqual(errors, [])
         self.assertEqual(summary["9f3a21c4"]["scans"], 3)
+
+        csv_out = self.out_dir / "out.csv"
+        wigle_out = self.out_dir / "out_wigle.csv"
+        html_out = self.out_dir / "out.html"
+        rc = warmap.main([
+            str(files[0]),
+            "--csv", str(csv_out),
+            "--wigle", str(wigle_out),
+            "--html", str(html_out),
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("WigleWifi-1.4", wigle_out.read_text(encoding="utf-8"))
+        self.assertIn("CorpWiFi", html_out.read_text(encoding="utf-8"))
 
     def test_partial_batch_with_bad_line_reports_first_bad_scan_id(self):
         good = json.dumps(make_scan(1))

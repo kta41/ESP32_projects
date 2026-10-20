@@ -170,6 +170,16 @@ def validate_scan_payload(obj: dict) -> None:
         if not isinstance(dev["wps"], bool) or not isinstance(dev["hidden"], bool):
             raise ValueError("wps/hidden deben ser booleanos")
 
+    if "promisc" in obj and obj["promisc"] is not None:
+        prom = obj["promisc"]
+        if not isinstance(prom, dict):
+            raise ValueError("promisc debe ser un objeto")
+        for k in ("mgmt_frames", "data_frames", "probe_req_frames", "deauth_frames"):
+            if not isinstance(prom.get(k), int) or prom[k] < 0:
+                raise ValueError(f"promisc.{k} inválido")
+        if not isinstance(prom.get("probes"), list) or not isinstance(prom.get("clients"), list):
+            raise ValueError("promisc.probes/clients deben ser listas")
+
 
 class ListenerState:
     def __init__(self, out_dir: Path, gps_enabled: bool = False):
@@ -274,6 +284,28 @@ class ListenerState:
                 f"{d['auth_mode']:<15}  {d['pairwise_cipher']:<9}  {wps_disp:<3}  "
                 f"{d['bssid']}  {ssid_disp}"
             )
+        prom = payload.get("promisc")
+        if isinstance(prom, dict):
+            probes = prom.get("probes", [])
+            clients = prom.get("clients", [])
+            deauth = prom.get("deauth_frames", 0)
+            deauth_str = f"\033[1;31m{deauth} DEAUTH!\033[0m" if deauth > 0 else "0 deauth"
+            print(
+                f"  \033[1;35m[PROMISC]\033[0m mgmt={prom.get('mgmt_frames', 0)} "
+                f"data={prom.get('data_frames', 0)} probes={len(probes)} "
+                f"clientes={len(clients)} | {deauth_str}"
+            )
+            for cl in sorted(clients, key=lambda x: x.get("rssi", -128), reverse=True)[:8]:
+                print(
+                    f"    \033[0;36m[STA]\033[0m {cl['sta_mac']} -> AP {cl['bssid']} "
+                    f"(ch {cl['channel']:>2}, {cl['rssi']:>4}dBm, {cl['frames']} tramas)"
+                )
+            for pr in sorted(probes, key=lambda x: x.get("rssi", -128), reverse=True)[:8]:
+                pssid = pr.get("ssid") or "<BROADCAST>"
+                print(
+                    f"    \033[0;33m[PROBE]\033[0m {pr['sta_mac']} busca '{pssid}' "
+                    f"(ch {pr['channel']:>2}, {pr['rssi']:>4}dBm, x{pr['count']})"
+                )
         print(f"\033[0;90m  -> Guardado en {self.current_file_path.name} (total sesion: {self.lines_written} escaneos)\033[0m", flush=True)
 
     def health(self) -> dict:
