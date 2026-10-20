@@ -148,6 +148,32 @@ static bool sanitizar_ssid(const uint8_t ssid[33], char out_limpio[33],
 
 /* --------------------- Dispositivo (AP) → objeto JSON --------------------- */
 
+static void add_pcap_traces_array(cJSON *parent, const char *key, uint16_t flags)
+{
+    cJSON *arr = cJSON_AddArrayToObject(parent, key);
+    if (arr == NULL) {
+        return;
+    }
+    static const struct {
+        uint16_t bit;
+        const char *name;
+    } k_traces[] = {
+        {PCAP_TRACE_EAPOL,      "EAPOL"},
+        {PCAP_TRACE_DEAUTH,     "DEAUTH"},
+        {PCAP_TRACE_ASSOC,      "ASSOC"},
+        {PCAP_TRACE_AUTH,       "AUTH"},
+        {PCAP_TRACE_PROBE_REQ,  "PROBE_REQ"},
+        {PCAP_TRACE_PROBE_RESP, "PROBE_RESP"},
+        {PCAP_TRACE_ACTION,     "ACTION"},
+        {PCAP_TRACE_BEACON,     "BEACON"},
+    };
+    for (size_t i = 0; i < sizeof(k_traces) / sizeof(k_traces[0]); i++) {
+        if ((flags & k_traces[i].bit) != 0) {
+            cJSON_AddItemToArray(arr, cJSON_CreateString(k_traces[i].name));
+        }
+    }
+}
+
 static cJSON *device_a_json(const wifi_ap_record_t *ap)
 {
     cJSON *device = cJSON_CreateObject();
@@ -251,6 +277,10 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
         cJSON_AddNumberToObject(prom, "data_frames", (double)res->promisc.data_frames);
         cJSON_AddNumberToObject(prom, "probe_req_frames", (double)res->promisc.probe_req_frames);
         cJSON_AddNumberToObject(prom, "deauth_frames", (double)res->promisc.deauth_frames);
+        cJSON_AddNumberToObject(prom, "eapol_frames", (double)res->promisc.eapol_frames);
+        cJSON_AddNumberToObject(prom, "pcap_frames", (double)res->promisc.pcap_captured_frames);
+        cJSON_AddNumberToObject(prom, "pcap_dropped", (double)res->promisc.pcap_dropped_frames);
+        cJSON_AddNumberToObject(prom, "pcap_bytes", (double)res->promisc.pcap_captured_bytes);
 
         cJSON *probes_arr = cJSON_AddArrayToObject(prom, "probes");
         cJSON *clients_arr = cJSON_AddArrayToObject(prom, "clients");
@@ -281,6 +311,9 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
             cJSON_AddNumberToObject(item, "rssi", pr->rssi);
             cJSON_AddNumberToObject(item, "channel", pr->channel);
             cJSON_AddNumberToObject(item, "count", pr->count);
+            if (pr->pcap_flags != 0) {
+                add_pcap_traces_array(item, "pcap_traces", pr->pcap_flags);
+            }
             cJSON_AddItemToArray(probes_arr, item);
         }
 
@@ -301,7 +334,30 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
             cJSON_AddNumberToObject(item, "rssi", cl->rssi);
             cJSON_AddNumberToObject(item, "channel", cl->channel);
             cJSON_AddNumberToObject(item, "frames", cl->frames);
+            if (cl->pcap_flags != 0) {
+                add_pcap_traces_array(item, "pcap_traces", cl->pcap_flags);
+            }
             cJSON_AddItemToArray(clients_arr, item);
+        }
+
+        cJSON *ap_pcap_arr = cJSON_AddArrayToObject(prom, "ap_pcap");
+        if (ap_pcap_arr == NULL) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+        for (uint16_t i = 0; i < res->promisc.num_ap_pcap; i++) {
+            const promisc_ap_pcap_t *ap = &res->promisc.ap_pcap[i];
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) {
+                cJSON_Delete(root);
+                return NULL;
+            }
+            char bssid_str[18] = {0};
+            bssid_to_str(ap->bssid, bssid_str, sizeof(bssid_str));
+            cJSON_AddStringToObject(item, "bssid", bssid_str);
+            cJSON_AddNumberToObject(item, "pcap_frames", ap->pcap_frames);
+            add_pcap_traces_array(item, "pcap_traces", ap->pcap_flags);
+            cJSON_AddItemToArray(ap_pcap_arr, item);
         }
     }
 

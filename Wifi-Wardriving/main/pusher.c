@@ -18,14 +18,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "esp_timer.h"
 #include "jsonl_writer.h"
+#include "pcap_store.h"
 #include "scan_store.h"
 #include "session.h"
 #include "wifi_mgr.h"
 
 static const char *TAG = "PUSHER";
 
-#define MAX_BATCH_SCANS   4
+#define MAX_BATCH_SCANS   2
 #define HTTP_TIMEOUT_MS   8000
 #define RESP_BUF_SIZE     256
 
@@ -251,6 +253,10 @@ push_report_t pusher_flush_pending(void)
 
             size_t sent_now = 0;
             batch_outcome_t out = post_one_batch(batch, count, &sent_now);
+            /* Fallback: si un lote grande no cabe en heap contiguo de cJSON, reducir a 1 escaneo por POST. */
+            if (out == BATCH_RETRYABLE_ERROR && sent_now == 0 && count > 1 && wifi_mgr_is_connected()) {
+                out = post_one_batch(batch, 1, &sent_now);
+            }
             report.bytes_sent += sent_now;
 
             if (out == BATCH_SENT_ALL) {
@@ -280,6 +286,85 @@ push_report_t pusher_flush_pending(void)
         report.status = PUSH_STATUS_FAIL;
     }
     return report;
+}
+
+bool pusher_flush_pcap(uint32_t scan_id, size_t *out_bytes_sent, uint32_t *out_pkts_sent)
+{
+    if (out_bytes_sent != NULL) {
+        *out_bytes_sent = 0;
+    }
+    if (out_pkts_sent != NULL) {
+        *out_pkts_sent = 0;
+    }
+
+    if (pcap_store_pending_bytes() == 0 || !wifi_mgr_is_connected()) {
+        return false;
+    }
+
+    esp_ip4_addr_t gw;
+    if (!wifi_mgr_get_gateway_ip(&gw)) {
+        return false;
+    }
+
+    uint8_t *buf = NULL;
+    size_t len = 0;
+    uint32_t pkts = 0;
+    if (!pcap_store_snapshot(&buf, &len, &pkts) || buf == NULL || len == 0) {
+        free(buf);
+        return false;
+    }
+
+    char url[80];
+    snprintf(url, sizeof(url), "http://" IPSTR ":%d/pcap",
+             IP2STR(&gw), CONFIG_WARDRIVE_LISTENER_PORT);
+
+    char hdr_scan[16];
+    char hdr_pkts[16];
+    char hdr_ts[24];
+    snprintf(hdr_scan, sizeof(hdr_scan), "%" PRIu32, scan_id);
+    snprintf(hdr_pkts, sizeof(hdr_pkts), "%" PRIu32, pkts);
+    snprintf(hdr_ts, sizeof(hdr_ts), "%" PRId64, esp_timer_get_time());
+
+    resp_acc_t resp = {0};
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .event_handler = http_event_cb,
+        .user_data = &resp,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == NULL) {
+        free(buf);
+        return false;
+    }
+
+    esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
+    esp_http_client_set_header(client, "X-Session-Id", session_get_id());
+    esp_http_client_set_header(client, "X-Scan-Id", hdr_scan);
+    esp_http_client_set_header(client, "X-Pcap-Count", hdr_pkts);
+    esp_http_client_set_header(client, "X-Device-Ts-Us", hdr_ts);
+    esp_http_client_set_post_field(client, (const char *)buf, (int)len);
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = (err == ESP_OK) ? esp_http_client_get_status_code(client) : -1;
+    esp_http_client_cleanup(client);
+    free(buf);
+
+    if (err == ESP_OK && status == 200) {
+        pcap_store_consume(len, pkts);
+        if (out_bytes_sent != NULL) {
+            *out_bytes_sent = len;
+        }
+        if (out_pkts_sent != NULL) {
+            *out_pkts_sent = pkts;
+        }
+        return true;
+    }
+
+    ESP_LOGW(TAG, "POST /pcap falló (status=%d, err=%s)", status, esp_err_to_name(err));
+    return false;
 }
 
 const char *pusher_status_str(push_status_t status)

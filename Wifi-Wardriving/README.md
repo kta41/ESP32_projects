@@ -14,22 +14,21 @@ Stealth passive & promiscuous 802.11 reconnaissance sensor built on **ESP-IDF v6
    - Enforces reduced TX power (`CONFIG_WARDRIVE_TX_POWER`, default `40` = 10 dBm).
    - Uses full-channel scan on association (`WIFI_ALL_CHANNEL_SCAN`) so **hidden SSID** hotspots work reliably out of the box.
    - Non-blocking FreeRTOS reconnection timer (5 s rate limit) coordinated with the scanner task so connection retries never block `esp_wifi_scan_start()`.
-2. **Passive Scanner + Simultaneous 802.11 Promiscuous Sniffer (`main/scanner.c`, `main/promisc.c`)**:
+2. **Passive Scanner + Simultaneous 802.11 Promiscuous Sniffer & PCAP/Radiotap Capture (`main/scanner.c`, `main/promisc.c`, `main/pcap_store.c`)**:
    - Strict 15 s start-to-start cadence (`vTaskDelayUntil`) using `WIFI_SCAN_TYPE_PASSIVE` and a 300 ms/channel dwell time (zero probe frames transmitted during channel sweeps).
    - **Simultaneous promiscuous capture (`WIFI_PKT_MGMT | WIFI_PKT_DATA`)**: extracts associated client stations (`ToDS`/`FromDS` data frames + `Assoc`/`Reassoc`/`Auth` management frames), client `Probe Request` PNLs (searched SSIDs), and `Deauth`/`Disassoc` frame counters.
-   - **Triple identity exclusion**: automatically strips the ESP32's own MAC, the active hotspot BSSID, the last remembered hotspot BSSID, and `CONFIG_WARDRIVE_WIFI_SSID` from both AP lists and promiscuous tables.
+   - **Selective PCAP + Radiotap (`DLT_IEEE802_11_RADIO = 127`)**: buffers raw 802.11 management frames (1 Beacon per BSSID/cycle, Probe Req/Resp, Assoc/Reassoc, Auth, Deauth/Disassoc, Action) and **WPA/WPA2/WPA3 EAPOL handshakes** (`0x888E`) in RAM (`CONFIG_WARDRIVE_PCAP_BUF_KB`, default 32 KB) and streams them via `POST /pcap` to the phone, which writes standard `.pcap` files with UTC-rebased timestamps ready for Wireshark / `hcxpcapngtool` / `aircrack-ng`.
+   - **Triple identity exclusion**: automatically strips the ESP32's own MAC, the active hotspot BSSID, the last remembered hotspot BSSID, and `CONFIG_WARDRIVE_WIFI_SSID` from AP lists, promiscuous tables, and `.pcap` captures.
 3. **RAM Ring Buffer (`main/scan_store.c`)**:
    - Pre-allocates `CONFIG_WARDRIVE_RING_SLOTS` (8 slots × 128 raw AP records in BSS) with zero flash writes.
    - Drops the oldest scan and increments the cumulative `lost_before` counter if the uplink stays down across more than 8 cycles.
    - Flags retained scans with `buffered: true` whenever a push cycle fails.
 4. **Batched HTTP Pusher (`main/pusher.c`)**:
-   - Serializes payloads on the fly via `build_scan_json_v1()` (`main/jsonl_writer.c`) and sends up to 4 scans per `POST http://<gateway_ip>:47471/scans` (`Content-Type: application/x-ndjson`).
+   - Serializes payloads on the fly via `build_scan_json_v1()` (`main/jsonl_writer.c`) and sends up to 2 scans per `POST http://<gateway_ip>:47471/scans` (`Content-Type: application/x-ndjson`), plus raw PCAP + Radiotap frames via `POST http://<gateway_ip>:47471/pcap`.
    - Includes `X-Session-Id`, `X-First-Scan-Id`, and `X-Last-Scan-Id` headers, an 8 s timeout, and stepped retries (`+1 s`, `+4 s`, `+8 s`). Skips HTTP push immediately without wasting timeouts when Wi-Fi is disconnected.
-5. **Mobile Collector & CLI Suite for Termux / Kali NetHunter (`tools/`)**:
-   - `tools/listener.py` (`warwifi`): multi-threaded HTTP receiver (`POST /scans`, `GET /health`), in-memory `(session_id, scan_id)` deduplication, live colorized terminal table (APs + `[STA]` clients + `[PROBE]` PNLs + `DEAUTH` alerts), and append-only persistence in `wardrive_YYYYMMDD_HHMM.jsonl`.
-   - `tools/warmap.py` (`warmap`): CLI & offline SIGINT analyzer (channel occupancy, auth/cipher breakdown, weak networks, exposed WPS, hidden SSIDs, 40,355-prefix IEEE OUI resolution, CSV, WiGLE CSV v1.4, and standalone HTML dashboard export).
-   - `tools/validate.py` (`warcheck`): schema v1 verifier checking `scan_id` monotonicity, `lost_before` consistency, and duplicate absence.
-   - `tools/android/`: Kali NetHunter `proot` launcher (`nethunter-launcher.sh`), mobile CLI wrappers (`warwifi`, `warmap`, `warcheck`), phone deployment script (`deploy_phone.sh`), and PC sync utility (`warpull`).
+5. **Companion Repositories (3-Tier Architecture)**:
+   - [**`kta41/SIGINT-Client`**](https://github.com/kta41/SIGINT-Client) *(Private)*: Android / Termux / Kali NetHunter collector (`warwifi`), offline analyzer (`warmap`, `warcheck`), and automatic delta uploader (`warsync`) to the central hub.
+   - [**`kta41/SIGINT-Console`**](https://github.com/kta41/SIGINT-Console) *(Private)*: Central Docker intelligence & correlation web console listening on port `47891` (HTTP) / `47892` (HTTPS) with deduplicated JSONL and PCAP storage.
 
 ---
 
@@ -102,38 +101,30 @@ Each scan line emitted by the ESP32-S3 and wrapped by `listener.py` follows:
 
 ---
 
-## 📱 Mobile & PC Workflow
+## 📱 Mobile Collector ([`kta41/SIGINT-Client`](https://github.com/kta41/SIGINT-Client)) & Central Hub ([`kta41/SIGINT-Console`](https://github.com/kta41/SIGINT-Console))
 
-Deploy or update the collector suite on an Android phone over USB (ADB + SSH on port `8022`):
+The Android / Termux / Kali NetHunter collector and synchronization tools live in the private [**`kta41/SIGINT-Client`**](https://github.com/kta41/SIGINT-Client) repository:
 
 ```bash
-./tools/android/deploy_phone.sh
+cd ../SIGINT-Client
+./android/deploy_phone.sh      # Deploys warwifi, warmap, warcheck, and warsync to the phone
 ```
 
-### On the PC (WSL) + Sync with [SIGINT-Console](https://github.com/kta41/SIGINT-Console)
+On the phone (Termux / Kali NetHunter):
 
 ```bash
-warpull                        # Pulls all .jsonl files from the phone (USB or Wi-Fi), builds local reports, and syncs to ../SIGINT-Console/data/
-```
-
-To launch the central Docker hub ([**kta41/SIGINT-Console**](https://github.com/kta41/SIGINT-Console)):
-
-```bash
-git clone https://github.com/kta41/SIGINT-Console.git
-cd SIGINT-Console
-docker compose up -d --build
-# Open http://127.0.0.1:8080 (avoid https:// / HSTS on localhost by using 127.0.0.1)
-```
-
-### On the Phone (Termux / Kali NetHunter)
-
-```bash
-warwifi                        # Starts the live listener on 0.0.0.0:47471 (with wake-lock)
-warmap                         # Prints the SIGINT audit report (APs + Clients + Probes)
-warmap --csv networks.csv      # Exports deduplicated BSSID catalog to CSV
-warmap --wigle wigle.csv       # Exports in official WiGLE CSV v1.4 format
-warmap --html dashboard.html   # Generates a standalone offline HTML SIGINT console
+warwifi                        # Starts live JSONL + PCAP collector on 0.0.0.0:47471
+warsync                        # Auto-discovers SIGINT-Console on port 47891 and pushes delta JSONL + PCAP
+warmap                         # Prints the SIGINT audit report (APs + Clients + Probes + PCAP traces)
 warcheck                       # Validates integrity and continuity of all .jsonl files
+```
+
+To launch the central Docker hub ([**`kta41/SIGINT-Console`**](https://github.com/kta41/SIGINT-Console)):
+
+```bash
+cd ../SIGINT-Console
+docker compose up -d --build
+# Open http://127.0.0.1:47891
 ```
 
 ---
@@ -150,12 +141,6 @@ idf.py menuconfig
 # Navigate to "Wardrive (sensor sigiloso)" -> set hotspot SSID and WPA2 password
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
-```
-
-### Local Unit Tests
-
-```bash
-python3 -m unittest discover -s tools -p 'test_*.py' -v
 ```
 
 ---

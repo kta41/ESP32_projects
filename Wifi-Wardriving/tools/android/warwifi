@@ -1,3 +1,0 @@
-#!/data/data/com.termux/files/usr/bin/bash
-termux-wake-lock 2>/dev/null || true
-exec nh "cd ~/wardrive && exec python3 listener.py --port 47471 --out ~/wardrive/wardrive_data \"\$@\""

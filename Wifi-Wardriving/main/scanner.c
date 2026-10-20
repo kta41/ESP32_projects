@@ -143,15 +143,18 @@ static void tarea_escaneo(void *pv)
 
             /* Drenar el ring hacia el gateway en lotes de hasta 4 (§3.7). */
             push_report_t rep = pusher_flush_pending();
+            pusher_flush_pcap(s_result.scan_id, &rep.pcap_bytes_sent, &rep.pcap_pkts_sent);
 
-            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes, %u clientes, %u probes, %" PRIu32 " deauth (%" PRIu32 ".%" PRIu32 " s) | "
-                          "push: %s (%u bytes, %u pendientes) | heap=%lu B",
+            ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes, %u clientes, %u probes, %" PRIu32 " deauth, %" PRIu32 " eapol (%" PRIu32 ".%" PRIu32 " s) | "
+                          "push: %s (%u B jsonl, %" PRIu32 " pkts/%u B pcap, %u pend) | heap=%lu B",
                      s_result.scan_id, s_result.stored,
                      s_result.promisc.num_clients, s_result.promisc.num_probes,
-                     s_result.promisc.deauth_frames,
+                     s_result.promisc.deauth_frames, s_result.promisc.eapol_frames,
                      s_result.duration_ms / 1000, (s_result.duration_ms % 1000) / 100,
                      pusher_status_str(rep.status),
-                     (unsigned)rep.bytes_sent, (unsigned)rep.pending_after,
+                     (unsigned)rep.bytes_sent,
+                     rep.pcap_pkts_sent, (unsigned)rep.pcap_bytes_sent,
+                     (unsigned)rep.pending_after,
                      (unsigned long)esp_get_free_heap_size());
         }
 

@@ -64,6 +64,33 @@ menu "Wardrive (sensor sigiloso)"
             asociación al SSID oculto falla con los valores por defecto
             (ROADMAP §3.2).
 
+    config WARDRIVE_PCAP_ENABLE
+        bool "Captura selectiva PCAP + Radiotap (MGMT + Handshakes EAPOL)"
+        default y
+        help
+            Almacena en RAM las tramas 802.11 de gestión (Beacon deduplicado
+            por ciclo, Probe Req/Resp, Assoc/Auth, Deauth/Disassoc) y las
+            tramas de datos EAPOL (4-way handshake WPA2/WPA3) con cabecera
+            Radiotap (DLT 127) y las envía por HTTP POST /pcap al móvil.
+
+    config WARDRIVE_PCAP_BUF_KB
+        int "Tamaño del buffer RAM para paquetes PCAP (KB)"
+        depends on WARDRIVE_PCAP_ENABLE
+        range 8 128
+        default 16
+        help
+            Capacidad estática en RAM reservada para encolar tramas PCAP
+            entre envíos HTTP al listener.
+
+    config WARDRIVE_PCAP_SNAPLEN
+        int "Longitud máxima de captura por trama PCAP (snaplen bytes)"
+        depends on WARDRIVE_PCAP_ENABLE
+        range 128 1600
+        default 512
+        help
+            Trunca tramas superiores a este tamaño (512 B cubre holgadamente
+            cualquier cabecera 802.11 + IEs de gestión y mensajes EAPOL M1-M4).
+
     config WARDRIVE_DEBUG_LEGACY_SCAN
         bool "DEBUG: conservar el bucle de escaneo ACTIVO del baseline"
         default n

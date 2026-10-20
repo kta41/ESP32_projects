@@ -1,2 +1,0 @@
-#!/data/data/com.termux/files/usr/bin/bash
-exec nh "python3 /home/Kta41/wardrive/validate.py /home/Kta41/wardrive/wardrive_data/wardrive_*.jsonl"

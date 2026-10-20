@@ -1,4 +1,4 @@
-idf_component_register(SRCS "promisc.c" "scan_store.c" "pusher.c" "main.c" "wifi_mgr.c" "jsonl_writer.c" "scanner.c" "session.c"
+idf_component_register(SRCS "pcap_store.c" "promisc.c" "scan_store.c" "pusher.c" "main.c" "wifi_mgr.c" "jsonl_writer.c" "scanner.c" "session.c"
                            
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES esp_wifi nvs_flash esp_event esp_netif
