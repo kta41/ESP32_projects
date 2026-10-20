@@ -252,13 +252,20 @@ input[type="text"]:focus, select:focus, textarea:focus {{
   color: var(--accent);
   font-weight: 600;
 }}
+.table-wrap {{
+  overflow-x: auto;
+  max-height: 68vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}}
 table {{
   width: 100%;
   border-collapse: collapse;
   font-size: 12.8px;
 }}
 th, td {{
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: middle;
@@ -273,7 +280,9 @@ th {{
   cursor: pointer;
   user-select: none;
   position: sticky;
-  top: 53px;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 1px 0 var(--border-hi);
 }}
 tr:hover td {{
   background: rgba(56,189,248,0.04);
@@ -444,16 +453,17 @@ code, .mono {{
         </select>
         <div class="chip-group" id="net-chips">
           <span class="chip active" onclick="setNetFilter('all', this)">Todas</span>
+          <span class="chip" onclick="setNetFilter('insecure', this)" style="border-color:rgba(239,68,68,0.45);color:#f87171">⚠️ Redes No Seguras (OPEN/WEP/TKIP/WPS)</span>
+          <span class="chip" onclick="setNetFilter('weak', this)">Cifrado Débil (OPEN/WEP/TKIP)</span>
+          <span class="chip" onclick="setNetFilter('wps', this)">WPS Expuesto</span>
           <span class="chip" onclick="setNetFilter('multi', this)">Multi-Sesión (&ge;2)</span>
           <span class="chip" onclick="setNetFilter('clients', this)">Con Clientes Activos</span>
           <span class="chip" onclick="setNetFilter('probed', this)">Buscadas por STAs</span>
-          <span class="chip" onclick="setNetFilter('weak', this)">Cifrado Débil (OPEN/WEP/TKIP)</span>
-          <span class="chip" onclick="setNetFilter('wps', this)">WPS Expuesto</span>
           <span class="chip" onclick="setNetFilter('hidden', this)">SSID Oculto</span>
           <span class="chip" onclick="setNetFilter('tagged', this)">Etiquetadas</span>
         </div>
       </div>
-      <div style="overflow-x:auto">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -488,6 +498,7 @@ code, .mono {{
         <input type="text" id="dev-search" placeholder="Buscar por STA MAC, Tag, SSID buscado, AP conectado, OUI..." style="min-width:320px" oninput="renderDevicesTable()">
         <div class="chip-group" id="dev-chips">
           <span class="chip active" onclick="setDevFilter('all', this)">Todos</span>
+          <span class="chip" onclick="setDevFilter('insecure_ap', this)" style="border-color:rgba(239,68,68,0.45);color:#f87171">⚠️ En Red No Segura</span>
           <span class="chip" onclick="setDevFilter('multi', this)">Recurrentes (&ge;2 sesiones)</span>
           <span class="chip" onclick="setDevFilter('associated', this)">Asociados a un AP</span>
           <span class="chip" onclick="setDevFilter('probing', this)">Buscando Redes (PNL)</span>
@@ -496,7 +507,7 @@ code, .mono {{
           <span class="chip" onclick="setDevFilter('tagged', this)">Etiquetados</span>
         </div>
       </div>
-      <div style="overflow-x:auto">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -535,7 +546,7 @@ code, .mono {{
       <p style="color:var(--muted);margin-top:0">
         El GPS se asocia a nivel de <b>Sesión</b>. Desde aquí puedes nombrar cada sesión (ej. <i>"Auditoría Planta 2"</i>, <i>"Paseo Centro"</i>) y asignarle o corregir sus coordenadas GPS.
       </p>
-      <div style="overflow-x:auto">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -792,6 +803,7 @@ function renderNetworksTable() {{
   const filtered = DATA.aps.filter(ap => {{
     const tag = getNetworkTag(ap.bssid, ap.ssid);
     if (sesFilter && !ap.sessions.includes(sesFilter)) return false;
+    if (netFilter === "insecure" && !ap.is_weak && !ap.wps) return false;
     if (netFilter === "multi" && ap.sessions.length < 2) return false;
     if (netFilter === "clients" && ap.clients.length === 0) return false;
     if (netFilter === "probed" && ap.probing_stas.length === 0) return false;
@@ -828,13 +840,14 @@ function renderNetworksTable() {{
       ? `<span class="badge b-multi">${{ap.sessions.length}} sesiones</span>`
       : `<span class="mono" style="color:var(--muted)">${{esc(getSessionDisplay(ap.sessions[0] || ""))}}</span>`;
 
+    const secStyle = ap.is_weak ? 'color:#f87171;font-weight:700' : '';
     return `<tr>
       <td>${{rssiBar(ap.rssi)}}</td>
       <td class="mono">${{ap.primary_channel}} <span style="color:var(--muted)">(${{ap.band_mhz}})</span></td>
       <td>${{ssidDisp}}${{clusterBadge}}</td>
       <td><a class="entity-link mono" onclick="openApDossier('${{ap.bssid}}')">${{ap.bssid}}</a></td>
       <td>${{renderTagBadge(tag)}}</td>
-      <td class="mono">${{esc(ap.auth_mode)}} / ${{esc(ap.pairwise_cipher)}}</td>
+      <td class="mono" style="${{secStyle}}">${{esc(ap.auth_mode)}} / ${{esc(ap.pairwise_cipher)}}</td>
       <td>${{wpsBadge}}</td>
       <td>${{stasHtml}}</td>
       <td>${{probedHtml}}</td>
@@ -862,6 +875,13 @@ function renderDevicesTable() {{
 
   const filtered = DATA.devices.filter(d => {{
     const tag = getDeviceTag(d.sta_mac);
+    if (devFilter === "insecure_ap") {{
+      const onInsecure = d.associated_bssids.some(b => {{
+        const ap = DATA.ap_by_bssid[b];
+        return ap && (ap.is_weak || ap.wps);
+      }});
+      if (!onInsecure) return false;
+    }}
     if (devFilter === "multi" && d.sessions.length < 2) return false;
     if (devFilter === "associated" && d.associated_bssids.length === 0) return false;
     if (devFilter === "probing" && d.probed_ssids.length === 0) return false;
