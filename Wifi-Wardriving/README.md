@@ -84,6 +84,14 @@ Para desplegar o actualizar las herramientas en el teléfono por USB (ADB + SSH 
 
 Comandos disponibles directamente en Termux o dentro de Kali (`nh`):
 
+### En este PC (WSL)
+
+```bash
+warpull                        # Baja todos los .jsonl del móvil (USB o Wi-Fi) y genera dashboard.html + wigle.csv + redes.csv
+```
+
+### En el móvil (Termux / Kali NetHunter)
+
 ```bash
 warwifi                        # Inicia el listener en vivo en 0.0.0.0:47471 (con wake-lock)
 warmap                         # Muestra el informe de auditoría (APs + Clientes + Probes)
