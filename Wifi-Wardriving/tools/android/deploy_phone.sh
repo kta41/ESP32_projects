@@ -15,6 +15,8 @@ scp -P "$SSH_PORT" \
     "$TOOLS_DIR/listener.py" \
     "$TOOLS_DIR/validate.py" \
     "$TOOLS_DIR/warmap.py" \
+    "$TOOLS_DIR/dashboard_html.py" \
+    "$TOOLS_DIR/oui_es_db.json.gz" \
     "${TERMUX_USER}@127.0.0.1:~/kali-arm64/home/Kta41/wardrive/"
 
 scp -P "$SSH_PORT" \
@@ -26,7 +28,7 @@ scp -P "$SSH_PORT" \
 ssh -p "$SSH_PORT" "${TERMUX_USER}@127.0.0.1" '
 chmod 755 $PREFIX/bin/warwifi $PREFIX/bin/warmap $PREFIX/bin/warcheck
 chmod 755 ~/kali-arm64/home/Kta41/wardrive/*.py
-cp ~/kali-arm64/home/Kta41/wardrive/*.py ~/wardrive/
+cp ~/kali-arm64/home/Kta41/wardrive/*.py ~/kali-arm64/home/Kta41/wardrive/oui_es_db.json.gz ~/wardrive/
 
 cat > ~/kali-arm64/usr/local/bin/warwifi << "EOF"
 #!/bin/bash

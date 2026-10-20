@@ -182,20 +182,50 @@ def validate_scan_payload(obj: dict) -> None:
 
 
 class ListenerState:
-    def __init__(self, out_dir: Path, gps_enabled: bool = False):
+    def __init__(self, out_dir: Path, gps_enabled: bool = False, session_name: str = None):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.gps = GpsProvider(enabled=gps_enabled)
+        self.session_name = session_name
         self.lock = threading.Lock()
         self.seen = set()  # (session_id, scan_id)
         self.sessions = []
+        self.session_gps = {}  # session_id -> gps dict fijado a nivel de sesión
         self.lines_written = 0
         self.current_session_id = None
         self.current_file_path = None
 
+    def _register_session_metadata(self, session_id: str, gps_val):
+        tags_path = self.out_dir / "tags.json"
+        try:
+            if tags_path.exists():
+                data = json.loads(tags_path.read_text(encoding="utf-8"))
+            else:
+                data = {"sessions": {}, "networks": {}, "devices": {}}
+        except Exception:
+            data = {"sessions": {}, "networks": {}, "devices": {}}
+
+        sessions_map = data.setdefault("sessions", {})
+        entry = sessions_map.setdefault(session_id, {})
+        if self.session_name and not entry.get("name"):
+            entry["name"] = self.session_name
+        if gps_val and not entry.get("gps"):
+            entry["gps"] = gps_val
+        if "created_at" not in entry:
+            entry["created_at"] = now_iso_ms()
+
+        try:
+            tags_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
     def _ensure_file_for_session(self, session_id: str) -> Path:
-        if session_id not in self.sessions:
+        is_new_session = session_id not in self.sessions
+        if is_new_session:
             self.sessions.append(session_id)
+            # GPS vinculado a la sesión (se consulta una vez al abrir la sesión)
+            self.session_gps[session_id] = self.gps.get()
+            self._register_session_metadata(session_id, self.session_gps[session_id])
         if self.current_file_path is None or self.current_session_id != session_id:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             candidate = self.out_dir / f"wardrive_{stamp}_{session_id}.jsonl"
@@ -215,7 +245,6 @@ class ListenerState:
 
         accepted = 0
         last_scan_id = 0
-        gps_snapshot = self.gps.get()
 
         with self.lock:
             for idx, line in enumerate(raw_lines):
@@ -242,8 +271,10 @@ class ListenerState:
                     continue
 
                 target_file = self._ensure_file_for_session(payload["session_id"])
+                gps_snapshot = self.session_gps.get(payload["session_id"])
                 envelope = {
                     "recv_at": now_iso_ms(),
+                    "session_name": self.session_name,
                     "gps": gps_snapshot,
                     "payload": payload,
                 }
@@ -363,10 +394,11 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="IP de escucha (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=47471, help="Puerto TCP (default: 47471)")
     parser.add_argument("--out", type=Path, default=Path("./wardrive_data"), help="Directorio de salida JSONL")
-    parser.add_argument("--gps", action="store_true", help="Añadir coordenadas de termux-location")
+    parser.add_argument("--gps", action="store_true", help="Fijar coordenadas de termux-location al iniciar cada sesión")
+    parser.add_argument("--name", default=None, help="Nombre descriptivo para etiquetar la sesión actual")
     args = parser.parse_args()
 
-    state = ListenerState(out_dir=args.out, gps_enabled=args.gps)
+    state = ListenerState(out_dir=args.out, gps_enabled=args.gps, session_name=args.name)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(state))
     print(f"Wardrive listener escuchando en http://{args.host}:{server.server_address[1]}/scans (dir={args.out})")
     try:

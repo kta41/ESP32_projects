@@ -14,8 +14,8 @@
 #include "esp_err.h"
 #include "esp_wifi.h"
 
-#define WARDRIVE_MAX_PROBES  24
-#define WARDRIVE_MAX_CLIENTS 24
+#define WARDRIVE_MAX_PROBES  48
+#define WARDRIVE_MAX_CLIENTS 48
 
 /** Probe request capturada en modo promiscuo (móvil/portátil buscando red). */
 typedef struct {

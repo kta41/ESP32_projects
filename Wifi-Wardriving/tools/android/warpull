@@ -35,6 +35,7 @@ REMOTE_USER="$(ssh "${SSH_OPTS[@]}" "$TARGET_HOST" whoami 2>/dev/null || echo u0
 
 echo "[warpull] Descargando capturas desde ${REMOTE_USER}@${TARGET_HOST}:${REMOTE_DIR} ..."
 scp "${SCP_OPTS[@]}" "${REMOTE_USER}@${TARGET_HOST}:${REMOTE_DIR}/wardrive_*.jsonl" "$OUT_DIR/"
+scp "${SCP_OPTS[@]}" "${REMOTE_USER}@${TARGET_HOST}:${REMOTE_DIR}/tags.json" "$OUT_DIR/" 2>/dev/null || true
 
 shopt -s nullglob
 FILES=("$OUT_DIR"/wardrive_*.jsonl)

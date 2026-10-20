@@ -147,6 +147,20 @@ static void wifi_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type)
                 }
                 record_probe_locked(addr2, ssid_ptr, ssid_len, rssi, ch);
             }
+        } else if (subtype == 0x00 || subtype == 0x02) {
+            /* Association Request (0x00) / Reassociation Request (0x02):
+             * Addr1 = BSSID (AP), Addr2 = STA (cliente). */
+            if (!is_multicast_or_zero(addr2) && !is_multicast_or_zero(addr1)) {
+                record_client_locked(addr2, addr1, rssi, ch);
+            }
+        } else if (subtype == 0x0B) {
+            /* Authentication (0x0B): Addr3 = BSSID. Si Addr1 == BSSID, Addr2 es STA. */
+            if (!is_multicast_or_zero(addr3)) {
+                const uint8_t *sta = (memcmp(addr1, addr3, 6) == 0) ? addr2 : addr1;
+                if (!is_multicast_or_zero(sta) && memcmp(sta, addr3, 6) != 0) {
+                    record_client_locked(sta, addr3, rssi, ch);
+                }
+            }
         } else if (subtype == 0x0C || subtype == 0x0A) {
             /* Deauthentication (0x0C) / Disassociation (0x0A). */
             s_acc.deauth_frames++;
