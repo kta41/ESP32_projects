@@ -5,6 +5,7 @@
 set -euo pipefail
 
 PROJECT_DIR="/home/Kta41/GITHUB/ESP32_projects/Wifi-Wardriving"
+SIGINT_CONSOLE_DATA="/home/Kta41/GITHUB/SIGINT-Console/data"
 OUT_DIR="${1:-$PROJECT_DIR/wardrive_data}"
 ADB_BIN="${ADB_BIN:-$HOME/.local/bin/adb}"
 SSH_PORT="${SSH_PORT:-8022}"
@@ -49,6 +50,12 @@ python3 "$PROJECT_DIR/tools/warmap.py" "${FILES[@]}" \
     --csv "$OUT_DIR/redes.csv" \
     --wigle "$OUT_DIR/wigle.csv" \
     --html "$OUT_DIR/dashboard.html"
+
+if [ -d "$SIGINT_CONSOLE_DATA" ]; then
+    cp -f "$OUT_DIR"/wardrive_*.jsonl "$SIGINT_CONSOLE_DATA/" 2>/dev/null || true
+    [ -f "$OUT_DIR/tags.json" ] && cp -f "$OUT_DIR/tags.json" "$SIGINT_CONSOLE_DATA/" || true
+    echo "[warpull] Sincronizado automáticamente con SIGINT-Console ($SIGINT_CONSOLE_DATA)"
+fi
 
 echo ""
 echo "[warpull] Archivos listos en el PC:"

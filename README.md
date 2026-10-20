@@ -15,23 +15,29 @@
 
 A modular workspace for microcontroller experimentation, USB HID emulation, and wireless security research using ESP32-S3 development boards.
 
+> 🛰️ **Central Intelligence & Analysis Hub:** All wireless telemetry captured by the sensors in this repository is ingested, correlated, and visualized in [**kta41/SIGINT-Console**](https://github.com/kta41/SIGINT-Console) — our Dockerized SIGINT web platform for multi-session tracking, IEEE OUI resolution, PNL client correlation, and security auditing.
+
 ## 📂 Projects Layout
 
 ```text
+├── BLE-Recon/       # BLE passive reconnaissance & beacon parser (iBeacon / Eddystone / FindMy)
 ├── ESP32-RF-Lab/    # 2.4 GHz spectrum occupancy & link analysis (dual nRF24 + LVGL)
 ├── Mouse/           # USB HID Mouse Jiggler (prevent sleep / idle emulation)
-└── Wifi-Wardriving/ # Wi-Fi scan and wardriving log in JSON (ESP32-S3)
+└── Wifi-Wardriving/ # Stealth 802.11 passive + promiscuous sensor with HTTP NDJSON push
 ```
 
 ### 1. `Mouse/` — USB HID Jiggler
 * **What it does:** Acts as a plug-and-play USB device that periodically sends subtle, non-intrusive cursor movements to prevent the operating system from entering idle or sleep mode.
 * **Tech stack:** ESP32-S3 Native USB capabilities (USB MSC/HID stack).
 
-### 2. `Wifi-Wardriving/` — Wi-Fi Wardriving Logger
-* **What it does:** Scans nearby Wi-Fi networks and saves an inventory in JSON format inside the ESP32-S3 flash memory.
-* **Tech stack:** ESP-IDF, Wi-Fi scanning in STA mode, JSON serialization, and NVS persistence.
+### 2. `Wifi-Wardriving/` — Stealth 802.11 Passive & Promiscuous Sensor
+* **What it does:** Connects as a stealth STA (with per-session random MAC and 10 dBm TX power) to a mobile hotspot, performs passive 2.4 GHz channel sweeps + simultaneous 802.11 promiscuous sniffing (associated clients, Probe Request PNLs, and Deauth frames), buffers scans in RAM, and pushes NDJSON batches to the mobile receiver (`warwifi`) and [**SIGINT-Console**](https://github.com/kta41/SIGINT-Console).
+* **Tech stack:** ESP-IDF v6.1, FreeRTOS, RAM Ring Buffer (`scan_store`), HTTP batch pusher, Termux/Kali collector suite.
 
-### 3. `ESP32-RF-Lab/` — 2.4 GHz Spectrum & Link Analyzer
+### 3. `BLE-Recon/` — Bluetooth Low Energy Passive Reconnaissance
+* **What it does:** Continuous NimBLE passive scanner with protocol decoders for Apple Continuity / FindMy / AirTag, iBeacon, and Eddystone frames (planned integration into [**SIGINT-Console**](https://github.com/kta41/SIGINT-Console)).
+
+### 4. `ESP32-RF-Lab/` — 2.4 GHz Spectrum & Link Analyzer
 * **What it does:** Passive spectrum-occupancy scanner with dual nRF24L01+ receivers, an on-device LVGL UI, and a point-to-point packet-error-rate test between its own radios.
 * **Tech stack:** ESP-IDF, LVGL (`esp_lvgl_port`), shared SPI bus (`SPI2_HOST`), RPD-based energy detection.
 

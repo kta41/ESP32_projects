@@ -1,6 +1,9 @@
 # 📡 Wi-Fi Wardriving (ESP32-S3)
 
-Sensor de reconocimiento Wi-Fi pasivo en **ESP-IDF v6.1** para **ESP32-S3** que opera como cliente STA sigiloso de un hotspot móvil (visible u oculto), almacena capturas crudas en un ring buffer en RAM y transmite los lotes en formato **JSONL v1 (`POST /scans`)** al receptor ejecutándose en **Termux / Kali NetHunter** en el teléfono.
+Sensor de reconocimiento Wi-Fi pasivo y promiscuo en **ESP-IDF v6.1** para **ESP32-S3** que opera como cliente STA sigiloso de un hotspot móvil (visible u oculto), almacena capturas crudas en un ring buffer en RAM y transmite los lotes en formato **JSONL v1 (`POST /scans`)** al receptor ejecutándose en **Termux / Kali NetHunter** en el teléfono.
+
+> 🛰️ **Consola Central de Inteligencia (Frontend & Hub Docker):**
+> El análisis visual, la correlación multi-sesión de dispositivos/redes, la base de datos de 40.355 fabricantes IEEE OUI y el etiquetado persistente viven en el repositorio dedicado [**kta41/SIGINT-Console**](https://github.com/kta41/SIGINT-Console), que actúa como el cerebro central para todos los sensores de `ESP32_projects`.
 
 ---
 
@@ -84,10 +87,19 @@ Para desplegar o actualizar las herramientas en el teléfono por USB (ADB + SSH 
 
 Comandos disponibles directamente en Termux o dentro de Kali (`nh`):
 
-### En este PC (WSL)
+### En este PC (WSL) + Sincronización con [SIGINT-Console](https://github.com/kta41/SIGINT-Console)
 
 ```bash
-warpull                        # Baja todos los .jsonl del móvil (USB o Wi-Fi) y genera dashboard.html + wigle.csv + redes.csv
+warpull                        # Baja todos los .jsonl del móvil (USB o Wi-Fi), actualiza informes locales y sincroniza con ../SIGINT-Console/data/
+```
+
+Para levantar el cerebro central en Docker ([**kta41/SIGINT-Console**](https://github.com/kta41/SIGINT-Console)):
+
+```bash
+git clone https://github.com/kta41/SIGINT-Console.git
+cd SIGINT-Console
+docker compose up -d --build
+# Abrir http://localhost:8080 (incluye subida directa de .jsonl y guardado automático de tags)
 ```
 
 ### En el móvil (Termux / Kali NetHunter)
