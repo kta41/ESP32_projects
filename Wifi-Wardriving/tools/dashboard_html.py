@@ -463,6 +463,7 @@ code, .mono {{
           <span class="chip" onclick="setNetFilter('tagged', this)">Etiquetadas</span>
         </div>
       </div>
+      <div id="net-vuln-banner" style="display:none;margin-bottom:14px"></div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -796,6 +797,66 @@ function setNetFilter(f, el) {{
   renderNetworksTable();
 }}
 
+function getApVulnerabilities(ap) {{
+  const vulns = [];
+  if (ap.auth_mode === "OPEN") {{
+    vulns.push({{
+      sev: "CRÍTICO",
+      color: "var(--red)",
+      short: "Red Abierta (Sin cifrado)",
+      detail: "Tráfico 802.11 en texto claro (sin autenticación ni cifrado). Permite interceptación pasiva (sniffing de capa 2/3) e inyección/suplantación directa (Evil Twin / MitM)."
+    }});
+  }}
+  if (ap.auth_mode === "WEP" || ap.pairwise_cipher.includes("WEP")) {{
+    vulns.push({{
+      sev: "CRÍTICO",
+      color: "var(--red)",
+      short: "Cifrado WEP (RC4 roto)",
+      detail: "Utiliza RC4 con vectores de inicialización (IV) de 24 bits. La clave se recupera en minutos mediante ataques estadísticos FMS/PTW (aircrack-ng)."
+    }});
+  }}
+  if (ap.auth_mode === "WPA_PSK") {{
+    vulns.push({{
+      sev: "ALTO",
+      color: "var(--amber)",
+      short: "WPA1 PSK obsoleto",
+      detail: "Estándar WPA original (2003) obsoleto. Vulnerable a ataques de diccionario sobre el 4-Way Handshake / PMKID y degradación TKIP."
+    }});
+  }} else if (ap.auth_mode === "WPA_WPA2_PSK") {{
+    vulns.push({{
+      sev: "MEDIO",
+      color: "var(--amber)",
+      short: "Modo mixto WPA1/WPA2 habilitado",
+      detail: "El AP acepta clientes legacy WPA1 además de WPA2, ampliando la superficie de ataque por downgrade frente a WPA2/WPA3 puro."
+    }});
+  }}
+  if (ap.pairwise_cipher.includes("TKIP") || (ap.group_cipher && ap.group_cipher.includes("TKIP"))) {{
+    vulns.push({{
+      sev: "ALTO",
+      color: "var(--amber)",
+      short: "Cifrado TKIP activo (Beck-Tews / ChopChop)",
+      detail: "TKIP (RC4 + MIC Michael) está deprecado por el IEEE 802.11-2012. Permite descifrado parcial de paquetes cortos e inyección de QoS (ataques Beck-Tews / Ohigashi-Morii)."
+    }});
+  }}
+  if (ap.wps) {{
+    vulns.push({{
+      sev: "MEDIO",
+      color: "var(--accent)",
+      short: "WPS expuesto en baliza",
+      detail: "Wi-Fi Protected Setup (WPS) activo. El PIN de 8 dígitos se divide en dos mitades verificadas por separado (11.000 combinaciones máx.) y muchos chipsets son vulnerables a Pixie-Dust offline (reaver / bully)."
+    }});
+  }}
+  if (ap.hidden) {{
+    vulns.push({{
+      sev: "INFO",
+      color: "#c084fc",
+      short: "SSID oculto (Cloaking)",
+      detail: "Ocultar el SSID no aporta seguridad criptográfica: el nombre real viaja en claro en cada trama Probe Response y Association Request cuando un cliente legítimo se conecta."
+    }});
+  }}
+  return vulns;
+}}
+
 function renderNetworksTable() {{
   const q = (document.getElementById("net-search").value || "").toLowerCase().trim();
   const sesFilter = document.getElementById("net-session-filter").value;
@@ -822,14 +883,37 @@ function renderNetworksTable() {{
 
   document.getElementById("net-count-label").textContent = `${{filtered.length}} / ${{DATA.aps.length}} BSSIDs`;
 
+  // Banner explicativo cuando se filtra por Redes No Seguras / Cifrado Débil / WPS / Oculto
+  const bannerEl = document.getElementById("net-vuln-banner");
+  if (["insecure", "weak", "wps", "hidden"].includes(netFilter)) {{
+    const cOpenWep = filtered.filter(a => a.auth_mode === "OPEN" || a.auth_mode === "WEP").length;
+    const cTkip = filtered.filter(a => a.pairwise_cipher.includes("TKIP") || a.auth_mode.includes("WPA_")).length;
+    const cWps = filtered.filter(a => a.wps).length;
+    bannerEl.style.display = "block";
+    bannerEl.innerHTML = `
+      <div class="kv" style="border-left:3px solid var(--red);background:#161b2e">
+        <div class="kv-k" style="color:#f87171">DIAGNÓSTICO DE VULNERABILIDADES (${{filtered.length}} REDES SELECCIONADAS)</div>
+        <div style="margin-top:6px;display:grid;gap:4px;font-size:12.5px">
+          <div>• <b>Cifrado obsoleto WPA1 / TKIP (${{cTkip}} APs):</b> Soporta <code>TKIP</code> o modo mixto <code>WPA_WPA2_PSK</code>. TKIP está deprecado por IEEE 802.11 y permite ataques de recuperación de MIC/inyección (Beck-Tews) además de facilitar ataques de diccionario sobre handshakes WPA1.</div>
+          <div>• <b>Superficie WPS activa (${{cWps}} APs):</b> El protocolo WPS permite ataques offline <i>Pixie-Dust</i> o fuerza bruta reducida a 11.000 PINs independientemente de la complejidad de la clave WPA2.</div>
+          ${{cOpenWep > 0 ? `<div>• <b>Redes Abiertas / WEP (${{cOpenWep}} APs):</b> Sin confidencialidad de capa 2; captura de tráfico inmediata.</div>` : ""}}
+          <div style="color:var(--muted);margin-top:2px">💡 <i>Pasa el ratón sobre la etiqueta roja/ámbar de la columna Seguridad o haz clic en cualquier <b>SSID / BSSID</b> para ver el desglose técnico exacto de esa red.</i></div>
+        </div>
+      </div>`;
+  }} else {{
+    bannerEl.style.display = "none";
+    bannerEl.innerHTML = "";
+  }}
+
   const rows = filtered.map(ap => {{
     const tag = getNetworkTag(ap.bssid, ap.ssid);
+    const vulns = getApVulnerabilities(ap);
     const ssidDisp = ap.hidden
       ? `<span class="badge b-suspicious">&lt;OCULTA&gt;</span>`
       : `<a class="entity-link" onclick="openSsidDossier('${{esc(ap.ssid)}}')">${{esc(ap.ssid)}}</a>`;
     const clusterBadge = ap.cluster_size > 1
       ? ` <span class="badge b-multi" title="Mismo SSID en varios BSSIDs">${{ap.cluster_size}} APs</span>` : "";
-    const wpsBadge = ap.wps ? `<span class="badge b-target">WPS</span>` : `<span style="color:var(--muted)">no</span>`;
+    const wpsBadge = ap.wps ? `<span class="badge b-target" title="Wi-Fi Protected Setup expuesto (vulnerable a PIN/Pixie-Dust)">WPS</span>` : `<span style="color:var(--muted)">no</span>`;
     const stasHtml = ap.clients.length > 0
       ? `<a class="entity-link mono" onclick="openApDossier('${{ap.bssid}}')">${{ap.clients.length}} STAs</a>`
       : `<span style="color:var(--muted)">0</span>`;
@@ -841,13 +925,19 @@ function renderNetworksTable() {{
       : `<span class="mono" style="color:var(--muted)">${{esc(getSessionDisplay(ap.sessions[0] || ""))}}</span>`;
 
     const secStyle = ap.is_weak ? 'color:#f87171;font-weight:700' : '';
+    const vulnReasonsHtml = vulns.length > 0
+      ? `<div style="margin-top:3px;font-size:11px;color:#fbbf24">` +
+        vulns.map(v => `<span title="${{esc(v.detail)}}">⚠️ ${{esc(v.short)}}</span>`).join(" · ") +
+        `</div>`
+      : "";
+
     return `<tr>
       <td>${{rssiBar(ap.rssi)}}</td>
       <td class="mono">${{ap.primary_channel}} <span style="color:var(--muted)">(${{ap.band_mhz}})</span></td>
       <td>${{ssidDisp}}${{clusterBadge}}</td>
       <td><a class="entity-link mono" onclick="openApDossier('${{ap.bssid}}')">${{ap.bssid}}</a></td>
       <td>${{renderTagBadge(tag)}}</td>
-      <td class="mono" style="${{secStyle}}">${{esc(ap.auth_mode)}} / ${{esc(ap.pairwise_cipher)}}</td>
+      <td><span class="mono" style="${{secStyle}}">${{esc(ap.auth_mode)}} / ${{esc(ap.pairwise_cipher)}}</span>${{vulnReasonsHtml}}</td>
       <td>${{wpsBadge}}</td>
       <td>${{stasHtml}}</td>
       <td>${{probedHtml}}</td>
@@ -1105,6 +1195,19 @@ function openApDossier(bssid) {{
       <div class="kv"><div class="kv-k">WPS / Oculta</div><div class="kv-v">WPS: ${{ap.wps ? "SÍ" : "NO"}} · Oculta: ${{ap.hidden ? "SÍ" : "NO"}}</div></div>
       <div class="kv"><div class="kv-k">Señal Máx / Visto</div><div class="kv-v">${{ap.rssi}} dBm (${{ap.sightings}} veces)</div></div>
     </div>
+    <h4>Evaluación de Seguridad y Vulnerabilidades Detectadas</h4>
+    ${{(() => {{
+      const vulns = getApVulnerabilities(ap);
+      if (vulns.length === 0) {{
+        return `<div class="kv" style="margin-bottom:16px;border-left:3px solid var(--green)"><b style="color:var(--green)">✓ Configuracion robusta:</b> Autenticación ${{esc(ap.auth_mode)}} con cifrado ${{esc(ap.pairwise_cipher)}} puro y WPS deshabilitado.</div>`;
+      }}
+      return `<div style="display:grid;gap:8px;margin-bottom:16px">` + vulns.map(v => `
+        <div class="kv" style="border-left:3px solid ${{v.color}}">
+          <div class="kv-k" style="color:${{v.color}}">SEVERIDAD ${{esc(v.sev)}} · ${{esc(v.short)}}</div>
+          <div style="margin-top:4px;font-size:12.8px">${{esc(v.detail)}}</div>
+        </div>
+      `).join("") + `</div>`;
+    }})()}}
     <h4>Sesiones donde se detectó (${{ap.sessions.length}})</h4>
     <div style="margin-bottom:16px">${{ap.sessions.map(s => `<span class="badge b-known" style="margin-right:6px">${{esc(getSessionDisplay(s))}}</span>`).join("")}}</div>
     <h4>Estaciones Clientes Asociadas a este BSSID (${{stas.length}})</h4>
@@ -1132,6 +1235,16 @@ function openApDossier(bssid) {{
 function openSsidDossier(ssid) {{
   const matchingAps = DATA.aps.filter(a => a.ssid === ssid);
   const probingDevs = DATA.devices.filter(d => d.probed_ssids.includes(ssid));
+  const ssidVulns = [];
+  const seenShorts = new Set();
+  matchingAps.forEach(ap => {{
+    getApVulnerabilities(ap).forEach(v => {{
+      if (!seenShorts.has(v.short)) {{
+        seenShorts.add(v.short);
+        ssidVulns.push(v);
+      }}
+    }});
+  }});
 
   let html = `
     <div class="modal-header">
@@ -1144,6 +1257,17 @@ function openSsidDossier(ssid) {{
         <button onclick="closeModal()">✕ Cerrar</button>
       </div>
     </div>
+    ${{matchingAps.length > 0 ? `
+      <h4>Diagnóstico de Seguridad de la Red "${{esc(ssid)}}"</h4>
+      ${{ssidVulns.length === 0
+        ? `<div class="kv" style="margin-bottom:14px;border-left:3px solid var(--green)"><b style="color:var(--green)">✓ Red segura:</b> Sin debilidades protocolarias detectadas (CCMP puro, sin WPS).</div>`
+        : `<div style="display:grid;gap:8px;margin-bottom:14px">` + ssidVulns.map(v => `
+            <div class="kv" style="border-left:3px solid ${{v.color}}">
+              <div class="kv-k" style="color:${{v.color}}">SEVERIDAD ${{esc(v.sev)}} · ${{esc(v.short)}}</div>
+              <div style="margin-top:4px;font-size:12.8px">${{esc(v.detail)}}</div>
+            </div>`).join("") + `</div>`
+      }}
+    ` : ""}}
     <h4>Puntos de Acceso (BSSIDs) que emiten este SSID (${{matchingAps.length}})</h4>
   `;
 
@@ -1270,20 +1394,29 @@ function openTagEditor(targetType, key, displayTitle) {{
       <label>Notas de inteligencia:<br>
         <textarea id="tag-notes" rows="3" style="width:100%;margin-top:4px">${{esc(cur.notes || "")}}</textarea>
       </label>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-        <button onclick="closeModal()">Cancelar</button>
-        <button class="btn-primary" onclick="saveEntityTag('${{group}}', '${{esc(normKey)}}')">Guardar Etiqueta</button>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">
+        <button onclick="resetEntityTag('${{group}}', '${{esc(normKey)}}')" style="border-color:rgba(239,68,68,0.45);color:#f87171">🔄 Restaurar predeterminado</button>
+        <div style="display:flex;gap:8px">
+          <button onclick="closeModal()">Cancelar</button>
+          <button class="btn-primary" onclick="saveEntityTag('${{group}}', '${{esc(normKey)}}')">Guardar Etiqueta</button>
+        </div>
       </div>
     </div>
   `;
   showModal(html);
 }}
 
+function resetEntityTag(group, key) {{
+  delete TAGS[group][key];
+  saveTags();
+  closeModal();
+}}
+
 function saveEntityTag(group, key) {{
   const label = document.getElementById("tag-label").value.trim();
   const category = document.getElementById("tag-cat").value;
   const notes = document.getElementById("tag-notes").value.trim();
-  if (!label) {{
+  if (!label && !notes) {{
     delete TAGS[group][key];
   }} else {{
     TAGS[group][key] = {{ label, category, notes }};
@@ -1320,13 +1453,22 @@ function openSessionEditor(sid) {{
       <label>Notas de la sesión:<br>
         <textarea id="ses-notes" rows="2" style="width:100%;margin-top:4px">${{esc(cur.notes || "")}}</textarea>
       </label>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-        <button onclick="closeModal()">Cancelar</button>
-        <button class="btn-primary" onclick="saveSessionMeta('${{esc(sid)}}')">Guardar Sesión</button>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">
+        <button onclick="resetSessionMeta('${{esc(sid)}}')" style="border-color:rgba(239,68,68,0.45);color:#f87171">🔄 Restaurar predeterminado</button>
+        <div style="display:flex;gap:8px">
+          <button onclick="closeModal()">Cancelar</button>
+          <button class="btn-primary" onclick="saveSessionMeta('${{esc(sid)}}')">Guardar Sesión</button>
+        </div>
       </div>
     </div>
   `;
   showModal(html);
+}}
+
+function resetSessionMeta(sid) {{
+  delete TAGS.sessions[sid];
+  saveTags();
+  closeModal();
 }}
 
 function saveSessionMeta(sid) {{
@@ -1334,11 +1476,19 @@ function saveSessionMeta(sid) {{
   const latRaw = document.getElementById("ses-lat").value.trim();
   const lonRaw = document.getElementById("ses-lon").value.trim();
   const notes = document.getElementById("ses-notes").value.trim();
+  if (!name && !notes && latRaw === "" && lonRaw === "") {{
+    delete TAGS.sessions[sid];
+    saveTags();
+    closeModal();
+    return;
+  }}
   const entry = TAGS.sessions[sid] || {{}};
   entry.name = name;
   entry.notes = notes;
   if (latRaw !== "" && lonRaw !== "") {{
     entry.gps = {{ lat: parseFloat(latRaw), lon: parseFloat(lonRaw), src: "manual" }};
+  }} else {{
+    delete entry.gps;
   }}
   TAGS.sessions[sid] = entry;
   saveTags();
@@ -1409,9 +1559,12 @@ function openTagManagerModal() {{
         <textarea id="new-tag-notes" rows="2" style="width:100%;margin-top:4px" placeholder="Notas opcionales..."></textarea>
       </label>
 
-      <div style="display:flex;justify-content:flex-end;gap:8px">
-        <button onclick="closeModal()">Cancelar</button>
-        <button class="btn-primary" onclick="saveManualNewTag()">Guardar</button>
+      <div style="display:flex;justify-content:space-between;gap:8px">
+        <button onclick="resetManualTag()" style="border-color:rgba(239,68,68,0.45);color:#f87171">🔄 Restaurar predeterminado</button>
+        <div style="display:flex;gap:8px">
+          <button onclick="closeModal()">Cancelar</button>
+          <button class="btn-primary" onclick="saveManualNewTag()">Guardar</button>
+        </div>
       </div>
     </div>
   `;
@@ -1420,6 +1573,16 @@ function openTagManagerModal() {{
     document.getElementById("new-tag-session-select").value = DATA.sessions[DATA.sessions.length - 1].session_id;
     onModalSessionSelect();
   }}
+}}
+
+function resetManualTag() {{
+  const grp = document.getElementById("new-tag-group").value;
+  let key = document.getElementById("new-tag-key").value.trim();
+  if (!key) return;
+  if (grp !== "sessions" && !key.startsWith("SSID:")) key = key.toUpperCase();
+  delete TAGS[grp][key];
+  saveTags();
+  closeModal();
 }}
 
 function toggleTagModalFields() {{
@@ -1455,22 +1618,34 @@ function saveManualNewTag() {{
   let key = document.getElementById("new-tag-key").value.trim();
   const label = document.getElementById("new-tag-label").value.trim();
   const notes = document.getElementById("new-tag-notes").value.trim();
-  if (!key || !label) return;
+  if (!key) return;
 
   if (grp === "sessions") {{
+    const latRaw = document.getElementById("new-tag-lat").value.trim();
+    const lonRaw = document.getElementById("new-tag-lon").value.trim();
+    if (!label && !notes && latRaw === "" && lonRaw === "") {{
+      delete TAGS.sessions[key];
+      saveTags();
+      closeModal();
+      return;
+    }}
     const entry = TAGS.sessions[key] || {{}};
     entry.name = label;
     entry.notes = notes;
-    const latRaw = document.getElementById("new-tag-lat").value.trim();
-    const lonRaw = document.getElementById("new-tag-lon").value.trim();
     if (latRaw !== "" && lonRaw !== "") {{
       entry.gps = {{ lat: parseFloat(latRaw), lon: parseFloat(lonRaw), src: "manual" }};
+    }} else {{
+      delete entry.gps;
     }}
     TAGS.sessions[key] = entry;
   }} else {{
-    const category = document.getElementById("new-tag-cat").value;
     if (!key.startsWith("SSID:")) key = key.toUpperCase();
-    TAGS[grp][key] = {{ label, category, notes }};
+    if (!label && !notes) {{
+      delete TAGS[grp][key];
+    }} else {{
+      const category = document.getElementById("new-tag-cat").value;
+      TAGS[grp][key] = {{ label, category, notes }};
+    }}
   }}
   saveTags();
   closeModal();
