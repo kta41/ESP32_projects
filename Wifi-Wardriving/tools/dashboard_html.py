@@ -1346,52 +1346,132 @@ function saveSessionMeta(sid) {{
 }}
 
 function openTagManagerModal() {{
+  const sessionOpts = DATA.sessions.map(s =>
+    `<option value="${{esc(s.session_id)}}">${{esc(getSessionDisplay(s.session_id))}} (${{esc(s.first_seen)}})</option>`
+  ).join("");
+
   const html = `
     <div class="modal-header">
       <div>
-        <div class="brand-badge">NUEVA ETIQUETA MANUAL</div>
-        <h3 style="margin:6px 0 0 0">Registrar Dispositivo (MAC) o Red (BSSID / SSID)</h3>
+        <div class="brand-badge">NUEVA ETIQUETA / ALIAS</div>
+        <h3 style="margin:6px 0 0 0">Nombrar Sesión, Dispositivo (MAC) o Red (BSSID / SSID)</h3>
       </div>
       <button onclick="closeModal()">✕</button>
     </div>
     <div style="display:grid;gap:12px">
-      <label>Tipo:<br>
-        <select id="new-tag-group" style="width:100%;margin-top:4px">
+      <label>Tipo de Entidad:<br>
+        <select id="new-tag-group" style="width:100%;margin-top:4px" onchange="toggleTagModalFields()">
+          <option value="sessions">Sesión de Captura (Session ID + GPS opcional)</option>
           <option value="devices">Dispositivo Cliente (STA MAC)</option>
-          <option value="networks">Punto de Acceso (BSSID o SSID:Nombre)</option>
+          <option value="networks">Punto de Acceso / Red (BSSID o SSID:Nombre)</option>
         </select>
       </label>
-      <label>MAC / BSSID / SSID:Nombre:<br>
-        <input type="text" id="new-tag-key" placeholder="AA:BB:CC:DD:EE:FF o SSID:MiRed" style="width:100%;margin-top:4px">
+
+      <div id="new-tag-session-wrap">
+        <label>Seleccionar Sesión capturada (o escribir ID debajo):<br>
+          <select id="new-tag-session-select" style="width:100%;margin-top:4px" onchange="onModalSessionSelect()">
+            <option value="">-- Seleccionar sesión existente --</option>
+            ${{sessionOpts}}
+          </select>
+        </label>
+      </div>
+
+      <label id="new-tag-key-label">Identificador (Session ID / MAC / BSSID / SSID:Nombre):<br>
+        <input type="text" id="new-tag-key" placeholder="Ej. 029feefe, AA:BB:CC:DD:EE:FF o SSID:MiRed" style="width:100%;margin-top:4px">
       </label>
-      <label>Nombre / Alias:<br>
-        <input type="text" id="new-tag-label" placeholder="Ej. iPhone Personal" style="width:100%;margin-top:4px">
+
+      <label>Nombre personalizado / Alias:<br>
+        <input type="text" id="new-tag-label" placeholder="Ej. Auditoría Planta 1 / Móvil de Juan / Router Casa" style="width:100%;margin-top:4px">
       </label>
-      <label>Categoría:<br>
-        <select id="new-tag-cat" style="width:100%;margin-top:4px">
-          <option value="PROPIO">PROPIO</option>
-          <option value="CONOCIDO">CONOCIDO</option>
-          <option value="OBJETIVO">OBJETIVO</option>
-          <option value="SOSPECHOSO">SOSPECHOSO</option>
-        </select>
+
+      <div id="new-tag-cat-wrap" style="display:none">
+        <label>Categoría:<br>
+          <select id="new-tag-cat" style="width:100%;margin-top:4px">
+            <option value="PROPIO">PROPIO</option>
+            <option value="CONOCIDO">CONOCIDO</option>
+            <option value="OBJETIVO">OBJETIVO</option>
+            <option value="SOSPECHOSO">SOSPECHOSO</option>
+            <option value="IGNORAR">IGNORAR</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="new-tag-gps-wrap" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label>Latitud GPS de la sesión (opcional):<br>
+          <input type="number" step="any" id="new-tag-lat" placeholder="ej. 40.416775" style="width:100%;margin-top:4px">
+        </label>
+        <label>Longitud GPS de la sesión (opcional):<br>
+          <input type="number" step="any" id="new-tag-lon" placeholder="ej. -3.703790" style="width:100%;margin-top:4px">
+        </label>
+      </div>
+
+      <label>Notas:<br>
+        <textarea id="new-tag-notes" rows="2" style="width:100%;margin-top:4px" placeholder="Notas opcionales..."></textarea>
       </label>
+
       <div style="display:flex;justify-content:flex-end;gap:8px">
         <button onclick="closeModal()">Cancelar</button>
-        <button class="btn-primary" onclick="saveManualNewTag()">Añadir</button>
+        <button class="btn-primary" onclick="saveManualNewTag()">Guardar</button>
       </div>
     </div>
   `;
   showModal(html);
+  if (DATA.sessions.length > 0) {{
+    document.getElementById("new-tag-session-select").value = DATA.sessions[DATA.sessions.length - 1].session_id;
+    onModalSessionSelect();
+  }}
+}}
+
+function toggleTagModalFields() {{
+  const grp = document.getElementById("new-tag-group").value;
+  const isSes = (grp === "sessions");
+  document.getElementById("new-tag-session-wrap").style.display = isSes ? "block" : "none";
+  document.getElementById("new-tag-gps-wrap").style.display = isSes ? "grid" : "none";
+  document.getElementById("new-tag-cat-wrap").style.display = isSes ? "none" : "block";
+  if (!isSes) {{
+    document.getElementById("new-tag-key").value = "";
+    document.getElementById("new-tag-label").value = "";
+    document.getElementById("new-tag-notes").value = "";
+  }} else if (DATA.sessions.length > 0) {{
+    onModalSessionSelect();
+  }}
+}}
+
+function onModalSessionSelect() {{
+  const sid = document.getElementById("new-tag-session-select").value;
+  if (!sid) return;
+  document.getElementById("new-tag-key").value = sid;
+  const cur = getSessionTag(sid);
+  const sObj = DATA.sessions.find(x => x.session_id === sid) || {{}};
+  const gps = cur.gps || sObj.gps || {{}};
+  document.getElementById("new-tag-label").value = cur.name || "";
+  document.getElementById("new-tag-notes").value = cur.notes || "";
+  document.getElementById("new-tag-lat").value = (gps.lat !== undefined && gps.lat !== null) ? gps.lat : "";
+  document.getElementById("new-tag-lon").value = (gps.lon !== undefined && gps.lon !== null) ? gps.lon : "";
 }}
 
 function saveManualNewTag() {{
   const grp = document.getElementById("new-tag-group").value;
   let key = document.getElementById("new-tag-key").value.trim();
   const label = document.getElementById("new-tag-label").value.trim();
-  const category = document.getElementById("new-tag-cat").value;
+  const notes = document.getElementById("new-tag-notes").value.trim();
   if (!key || !label) return;
-  if (!key.startsWith("SSID:")) key = key.toUpperCase();
-  TAGS[grp][key] = {{ label, category, notes: "" }};
+
+  if (grp === "sessions") {{
+    const entry = TAGS.sessions[key] || {{}};
+    entry.name = label;
+    entry.notes = notes;
+    const latRaw = document.getElementById("new-tag-lat").value.trim();
+    const lonRaw = document.getElementById("new-tag-lon").value.trim();
+    if (latRaw !== "" && lonRaw !== "") {{
+      entry.gps = {{ lat: parseFloat(latRaw), lon: parseFloat(lonRaw), src: "manual" }};
+    }}
+    TAGS.sessions[key] = entry;
+  }} else {{
+    const category = document.getElementById("new-tag-cat").value;
+    if (!key.startsWith("SSID:")) key = key.toUpperCase();
+    TAGS[grp][key] = {{ label, category, notes }};
+  }}
   saveTags();
   closeModal();
 }}
