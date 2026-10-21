@@ -103,20 +103,24 @@ Each scan line emitted by the ESP32-S3 and wrapped by `listener.py` follows:
 
 ## 📱 Mobile Collector ([`kta41/SIGINT-Client`](https://github.com/kta41/SIGINT-Client)) & Central Hub ([`kta41/SIGINT-Console`](https://github.com/kta41/SIGINT-Console))
 
-The Android / Termux / Kali NetHunter collector and synchronization tools live in the private [**`kta41/SIGINT-Client`**](https://github.com/kta41/SIGINT-Client) repository:
+The Android / Termux / Kali NetHunter collector and synchronization tools live in the private [**`kta41/SIGINT-Client`**](https://github.com/kta41/SIGINT-Client) repository, unified under the single `warwifi` CLI:
 
 ```bash
 cd ../SIGINT-Client
-./android/deploy_phone.sh      # Deploys warwifi, warmap, warcheck, and warsync to the phone
+./android/deploy_phone.sh      # Installs unified 'warwifi' CLI on the phone and PC
 ```
 
-On the phone (Termux / Kali NetHunter):
+On the phone (Termux / Kali NetHunter) or PC:
 
 ```bash
-warwifi                        # Starts live JSONL + PCAP collector on 0.0.0.0:47471
-warsync                        # Auto-discovers SIGINT-Console on port 47891 and pushes delta JSONL + PCAP
-warmap                         # Prints the SIGINT audit report (APs + Clients + Probes + PCAP traces)
-warcheck                       # Validates integrity and continuity of all .jsonl files
+warwifi                        # Starts live JSONL + PCAP radar collector on 0.0.0.0:47471
+warwifi --sync                 # Auto-discovers SIGINT-Console on port 47891 and pushes delta JSONL + PCAP
+warwifi --watch                # Waits in background for home Wi-Fi and auto-syncs to SIGINT-Console
+warwifi --status               # Shows local capture stats & SIGINT-Console connectivity
+warwifi --map                  # Prints the SIGINT audit report (APs + Clients + Probes + PCAP traces)
+warwifi --audit                # Deep PCAP Red Team triage (EAPOL M1-M4, PMKID, WPS, hc22000)
+warwifi --check                # Validates integrity and continuity of all .jsonl files
+warwifi --pull                 # (PC) Pulls captures from phone via SSH/ADB and syncs to SIGINT-Console
 ```
 
 To launch the central Docker hub ([**`kta41/SIGINT-Console`**](https://github.com/kta41/SIGINT-Console)):
