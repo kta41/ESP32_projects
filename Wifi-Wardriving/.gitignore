@@ -9,3 +9,4 @@ wardrive_data/
 build/
 managed_components/
 dependencies.lock
+.continue/*
