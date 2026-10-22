@@ -20,22 +20,22 @@ A modular workspace for microcontroller experimentation, USB HID emulation, and 
 ## 📂 Projects Layout
 
 ```text
-├── BLE-Recon/       # BLE passive reconnaissance & beacon parser (iBeacon / Eddystone / FindMy)
+├── BLE-Recon/       # Standalone BLE passive reconnaissance & beacon parser (iBeacon / Eddystone / FindMy)
 ├── ESP32-RF-Lab/    # 2.4 GHz spectrum occupancy & link analysis (dual nRF24 + LVGL)
 ├── Mouse/           # USB HID Mouse Jiggler (prevent sleep / idle emulation)
-└── Wifi-Wardriving/ # Stealth 802.11 passive + promiscuous sensor with HTTP NDJSON push
+└── Wifi-Wardriving/ # Multi-protocol 802.11 + BLE stealth sensor (PCAP/Radiotap, EAPOL, BLE fusion, HTTP NDJSON)
 ```
 
 ### 1. `Mouse/` — USB HID Jiggler
 * **What it does:** Acts as a plug-and-play USB device that periodically sends subtle, non-intrusive cursor movements to prevent the operating system from entering idle or sleep mode.
 * **Tech stack:** ESP32-S3 Native USB capabilities (USB MSC/HID stack).
 
-### 2. `Wifi-Wardriving/` — Stealth 802.11 Passive & Promiscuous Sensor
-* **What it does:** Connects as a stealth STA (with per-session random MAC and 10 dBm TX power) to a mobile hotspot, performs passive 2.4 GHz channel sweeps + simultaneous 802.11 promiscuous sniffing (associated clients, Probe Request PNLs, and Deauth frames), buffers scans in RAM, and pushes NDJSON batches to the mobile receiver (`warwifi`) and [**SIGINT-Console**](https://github.com/kta41/SIGINT-Console).
-* **Tech stack:** ESP-IDF v6.1, FreeRTOS, RAM Ring Buffer (`scan_store`), HTTP batch pusher, Termux/Kali collector suite.
+### 2. `Wifi-Wardriving/` — Multi-Protocol 802.11 + BLE Stealth Sensor
+* **What it does:** Connects as a stealth STA (per-session randomized MAC, 10 dBm TX power) to a mobile hotspot, performs passive 2.4 GHz channel sweeps + simultaneous **802.11 promiscuous sniffing** (associated clients, Probe Request PNLs, Deauth/Disassoc counters), captures selective **PCAP + Radiotap (`DLT 127`)** management frames and **WPA2/WPA3 EAPOL handshakes**, runs a concurrent **100 % passive NimBLE observer (`ble_fusion`)** for cross-protocol Wi-Fi ↔ BLE correlation, includes an opt-in token-gated **Red Team Deauth TX control channel (`udp/47472`)**, and streams NDJSON + PCAP batches to the mobile receiver (`warwifi`) and [**SIGINT-Console**](https://github.com/kta41/SIGINT-Console).
+* **Tech stack:** ESP-IDF v6.1, FreeRTOS, Wi-Fi/BLE software coexistence, compact RAM Ring Buffer (`scan_store`), zero-DOM streaming JSONL serializer, Termux/Kali collector suite.
 
 ### 3. `BLE-Recon/` — Bluetooth Low Energy Passive Reconnaissance
-* **What it does:** Continuous NimBLE passive scanner with protocol decoders for Apple Continuity / FindMy / AirTag, iBeacon, and Eddystone frames (planned integration into [**SIGINT-Console**](https://github.com/kta41/SIGINT-Console)).
+* **What it does:** Standalone continuous NimBLE passive scanner with protocol decoders for Apple Continuity / FindMy / AirTag, iBeacon, and Eddystone frames (also integrated directly into `Wifi-Wardriving` via `ble_fusion`).
 
 ### 4. `ESP32-RF-Lab/` — 2.4 GHz Spectrum & Link Analyzer
 * **What it does:** Passive spectrum-occupancy scanner with dual nRF24L01+ receivers, an on-device LVGL UI, and a point-to-point packet-error-rate test between its own radios.

@@ -24,6 +24,7 @@
 #include "ping/ping_sock.h"
 
 #include "ble_fusion.h"
+#include "deauth_udp.h"
 #include "scanner.h"
 #include "session.h"
 #include "wifi_mgr.h"
@@ -198,6 +199,13 @@ void app_main(void)
      * sigue operando solo con WiFi si el stack BT falla al arrancar. */
     if (ble_fusion_init() != 0) {
         ESP_LOGW(TAG, "Fusión BLE no iniciada: el sensor continúa en modo solo-WiFi");
+    }
+#endif
+
+#if CONFIG_WARDRIVE_DEAUTH_ENABLE
+    /* Canal de control deauth (opt-in Red Team, token requerido). No fatal. */
+    if (deauth_udp_start() != ESP_OK) {
+        ESP_LOGW(TAG, "Canal de control deauth no iniciado (revisa WARDRIVE_DEAUTH_TOKEN)");
     }
 #endif
 

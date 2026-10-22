@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "ble_fusion.h"
+#include "deauth_tx.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 
@@ -76,6 +77,23 @@ typedef struct {
     promisc_ap_pcap_t ap_pcap[WARDRIVE_MAX_AP_PCAP];
 } promisc_summary_t;
 
+/** Registro compacto de AP para el ring buffer en RAM (46 B frente a 92 B de wifi_ap_record_t). */
+typedef struct {
+    uint8_t bssid[6];
+    uint8_t ssid[33];
+    int8_t rssi;
+    uint8_t primary;
+    uint8_t second;
+    uint8_t authmode;
+    uint8_t pairwise_cipher;
+    uint8_t group_cipher;
+    uint8_t phy_11b : 1;
+    uint8_t phy_11g : 1;
+    uint8_t phy_11n : 1;
+    uint8_t phy_lr  : 1;
+    uint8_t wps     : 1;
+} wardrive_ap_record_t;
+
 /** Resultado crudo de un escaneo (metadatos + registros de AP + captura promiscua). */
 typedef struct {
     uint32_t scan_id;        /**< Contador monótono por sesión (§3.4). */
@@ -87,9 +105,10 @@ typedef struct {
     uint32_t lost_before;    /**< Escaneos enteros descartados por ring lleno (Fase 3). */
     bool buffered;           /**< Sufrió un push fallido antes de enviarse (Fase 3). */
     uint16_t num_records;    /**< == stored. */
-    wifi_ap_record_t records[CONFIG_WARDRIVE_MAX_APS];
+    wardrive_ap_record_t records[CONFIG_WARDRIVE_MAX_APS];
     promisc_summary_t promisc; /**< Telemetría promiscua 802.11 del ciclo. */
     ble_fusion_summary_t ble;  /**< Resumen BLE del ciclo (fusión BLE-Recon, P2). */
+    deauth_cycle_stats_t deauth_tx; /**< Auditoría de ráfagas deauth enviadas (opt-in). */
 } scan_result_t;
 
 /** @brief Crea el task de escaneo pasivo (llamar una vez desde app_main). */

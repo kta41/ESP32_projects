@@ -27,7 +27,7 @@
 
 static const char *TAG = "PUSHER";
 
-#define MAX_BATCH_SCANS   2
+#define MAX_BATCH_SCANS   1
 #define HTTP_TIMEOUT_MS   8000
 #define RESP_BUF_SIZE     256
 
@@ -58,6 +58,18 @@ static esp_err_t http_event_cb(esp_http_client_event_t *evt)
  */
 static char *build_batch_body(const scan_result_t **items, size_t count, size_t *out_len)
 {
+    if (count == 1) {
+        char *line = build_scan_json_v1(items[0], session_get_id());
+        if (line == NULL) {
+            return NULL;
+        }
+        size_t len = strlen(line);
+        line[len] = '\n';
+        line[len + 1] = '\0';
+        *out_len = len + 1;
+        return line;
+    }
+
     char *lines[MAX_BATCH_SCANS] = {0};
     size_t lens[MAX_BATCH_SCANS] = {0};
     size_t total_len = 0;

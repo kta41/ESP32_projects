@@ -26,6 +26,9 @@ esp_err_t wifi_mgr_init(void);
 /** @brief ¿Está el STA asociado y con IP? (flag limpiado al desconectar). */
 bool wifi_mgr_is_connected(void);
 
+/** @brief Espera hasta timeout_ms a que el STA obtenga IP (o termine el primer intento). */
+bool wifi_mgr_wait_initial_connect(uint32_t timeout_ms);
+
 /** @brief Pausa reintentos y aborta cualquier asociación en curso antes de escanear. */
 void wifi_mgr_pause_connect_for_scan(void);
 

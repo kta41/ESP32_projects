@@ -12,10 +12,60 @@
 
 #include "jsonl_writer.h"
 
+#include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "cJSON.h"
 #include "esp_timer.h"
+
+typedef struct {
+    char *buf;
+    size_t len;
+    size_t cap;
+} jbuf_t;
+
+static void jbuf_raw(jbuf_t *jb, const char *s, size_t n)
+{
+    if (jb->buf != NULL && jb->len + n < jb->cap) {
+        memcpy(jb->buf + jb->len, s, n);
+        jb->buf[jb->len + n] = '\0';
+    }
+    jb->len += n;
+}
+
+static void jbuf_printf(jbuf_t *jb, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void jbuf_printf(jbuf_t *jb, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    size_t avail = (jb->buf != NULL && jb->len < jb->cap) ? (jb->cap - jb->len) : 0;
+    int n = vsnprintf(avail > 0 ? jb->buf + jb->len : NULL, avail, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        jb->len += (size_t)n;
+    }
+}
+
+static void jbuf_str(jbuf_t *jb, const char *s)
+{
+    jbuf_raw(jb, "\"", 1);
+    for (const unsigned char *p = (const unsigned char *)s; *p != '\0'; p++) {
+        unsigned char c = *p;
+        if (c == '"' || c == '\\') {
+            char esc[2] = {'\\', (char)c};
+            jbuf_raw(jb, esc, 2);
+        } else if (c < 0x20) {
+            jbuf_printf(jb, "\\u%04x", (unsigned)c);
+        } else {
+            char ch = (char)c;
+            jbuf_raw(jb, &ch, 1);
+        }
+    }
+    jbuf_raw(jb, "\"", 1);
+}
 
 /* ------------------------- Mapeos a texto (§3.5) ------------------------- */
 
@@ -148,12 +198,9 @@ static bool sanitizar_ssid(const uint8_t ssid[33], char out_limpio[33],
 
 /* --------------------- Dispositivo (AP) → objeto JSON --------------------- */
 
-static void add_pcap_traces_array(cJSON *parent, const char *key, uint16_t flags)
+static void emit_pcap_traces_array(jbuf_t *jb, const char *key, uint16_t flags)
 {
-    cJSON *arr = cJSON_AddArrayToObject(parent, key);
-    if (arr == NULL) {
-        return;
-    }
+    jbuf_printf(jb, ",\"%s\":[", key);
     static const struct {
         uint16_t bit;
         const char *name;
@@ -167,42 +214,26 @@ static void add_pcap_traces_array(cJSON *parent, const char *key, uint16_t flags
         {PCAP_TRACE_ACTION,     "ACTION"},
         {PCAP_TRACE_BEACON,     "BEACON"},
     };
+    bool first = true;
     for (size_t i = 0; i < sizeof(k_traces) / sizeof(k_traces[0]); i++) {
         if ((flags & k_traces[i].bit) != 0) {
-            cJSON_AddItemToArray(arr, cJSON_CreateString(k_traces[i].name));
+            jbuf_printf(jb, "%s\"%s\"", first ? "" : ",", k_traces[i].name);
+            first = false;
         }
     }
+    jbuf_raw(jb, "]", 1);
 }
 
-static cJSON *device_a_json(const wifi_ap_record_t *ap)
+static void emit_device_json(jbuf_t *jb, const wardrive_ap_record_t *ap)
 {
-    cJSON *device = cJSON_CreateObject();
-    if (device == NULL) {
-        return NULL;
-    }
-
     char ssid_limpio[33];
     char ssid_hex[65];
     size_t longitud = 0;
     bool sustituido = sanitizar_ssid(ap->ssid, ssid_limpio, ssid_hex, &longitud);
 
-    cJSON_AddStringToObject(device, "ssid", ssid_limpio);
-    if (sustituido) {
-        cJSON_AddStringToObject(device, "ssid_hex", ssid_hex);
-    }
-
     char bssid[18] = {0};
     bssid_to_str(ap->bssid, bssid, sizeof(bssid));
 
-    cJSON_AddStringToObject(device, "bssid", bssid);
-    cJSON_AddNumberToObject(device, "rssi", ap->rssi);
-    cJSON_AddNumberToObject(device, "primary_channel", ap->primary);
-    cJSON_AddNumberToObject(device, "secondary_channel", ap->second);
-    cJSON_AddStringToObject(device, "auth_mode", authmode_to_str(ap->authmode));
-    cJSON_AddStringToObject(device, "pairwise_cipher", cipher_to_str(ap->pairwise_cipher));
-    cJSON_AddStringToObject(device, "group_cipher", cipher_to_str(ap->group_cipher));
-
-    /* proto: flags b/g/n concatenados; "lr" aparte solo si phy_lr (§3.5). */
     char proto[4];
     size_t p = 0;
     if (ap->phy_11b) {
@@ -215,87 +246,67 @@ static cJSON *device_a_json(const wifi_ap_record_t *ap)
         proto[p++] = 'n';
     }
     proto[p] = '\0';
-    cJSON_AddStringToObject(device, "proto", proto);
-    if (ap->phy_lr) {
-        cJSON_AddBoolToObject(device, "lr", true);
+
+    jbuf_raw(jb, "{\"ssid\":", 8);
+    jbuf_str(jb, ssid_limpio);
+    if (sustituido) {
+        jbuf_printf(jb, ",\"ssid_hex\":\"%s\"", ssid_hex);
     }
-
-    /* 20 MHz si no hay canal secundario, 40 en caso contrario (§3.5). */
-    cJSON_AddNumberToObject(device, "band_mhz",
-                            ap->second == WIFI_SECOND_CHAN_NONE ? 20 : 40);
-    cJSON_AddBoolToObject(device, "wps", ap->wps ? true : false);
-    cJSON_AddBoolToObject(device, "hidden", longitud == 0);
-
-    return device;
+    jbuf_printf(jb,
+                ",\"bssid\":\"%s\",\"rssi\":%d,\"primary_channel\":%u,\"secondary_channel\":%u,"
+                "\"auth_mode\":\"%s\",\"pairwise_cipher\":\"%s\",\"group_cipher\":\"%s\","
+                "\"proto\":\"%s\"",
+                bssid, (int)ap->rssi, (unsigned)ap->primary, (unsigned)ap->second,
+                authmode_to_str((wifi_auth_mode_t)ap->authmode),
+                cipher_to_str((wifi_cipher_type_t)ap->pairwise_cipher),
+                cipher_to_str((wifi_cipher_type_t)ap->group_cipher),
+                proto);
+    if (ap->phy_lr) {
+        jbuf_raw(jb, ",\"lr\":true", 10);
+    }
+    jbuf_printf(jb, ",\"band_mhz\":%d,\"wps\":%s,\"hidden\":%s}",
+                ap->second == WIFI_SECOND_CHAN_NONE ? 20 : 40,
+                ap->wps ? "true" : "false",
+                longitud == 0 ? "true" : "false");
 }
 
 /* ------------------------ Payload JSONL v1 (§3.5) ------------------------ */
 
-char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
+static void emit_scan_json_v1(jbuf_t *jb, const scan_result_t *res, const char *session_id)
 {
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) {
-        return NULL;
-    }
-
-    /* Cabecera: orden y tipos exactos del esquema congelado. */
-    cJSON_AddNumberToObject(root, "v", 1);
-    cJSON_AddStringToObject(root, "mode", "scan");
-    cJSON_AddStringToObject(root, "scan_type", "passive");
-    cJSON_AddStringToObject(root, "session_id", session_id);
-    cJSON_AddNumberToObject(root, "scan_id", (double)res->scan_id);
-    cJSON_AddNumberToObject(root, "device_ts_us", (double)res->ts_us);
-    cJSON_AddNumberToObject(root, "scan_duration_ms", (double)res->duration_ms);
-    cJSON_AddNumberToObject(root, "total_detected", res->total_detected);
-    cJSON_AddNumberToObject(root, "stored", res->stored);
-    cJSON_AddNumberToObject(root, "dropped", res->dropped);
-    cJSON_AddNumberToObject(root, "lost_before", (double)res->lost_before);
-    cJSON_AddBoolToObject(root, "buffered", res->buffered);
-
-    cJSON *devices = cJSON_AddArrayToObject(root, "devices");
-    if (devices == NULL) {
-        cJSON_Delete(root);
-        return NULL;
-    }
+    jbuf_printf(jb,
+                "{\"v\":1,\"mode\":\"scan\",\"scan_type\":\"passive\",\"session_id\":\"%s\","
+                "\"scan_id\":%" PRIu32 ",\"device_ts_us\":%" PRId64 ",\"scan_duration_ms\":%" PRIu32 ","
+                "\"total_detected\":%u,\"stored\":%u,\"dropped\":%u,"
+                "\"lost_before\":%" PRIu32 ",\"buffered\":%s,\"devices\":[",
+                session_id, res->scan_id, res->ts_us, res->duration_ms,
+                (unsigned)res->total_detected, (unsigned)res->stored, (unsigned)res->dropped,
+                res->lost_before, res->buffered ? "true" : "false");
 
     for (uint16_t i = 0; i < res->num_records; i++) {
-        cJSON *device = device_a_json(&res->records[i]);
-        if (device == NULL || cJSON_AddItemToArray(devices, device) == 0) {
-            cJSON_Delete(device);
-            cJSON_Delete(root);
-            return NULL;
+        if (i > 0) {
+            jbuf_raw(jb, ",", 1);
         }
+        emit_device_json(jb, &res->records[i]);
     }
+    jbuf_raw(jb, "]", 1);
 
     if (res->promisc.enabled) {
-        cJSON *prom = cJSON_AddObjectToObject(root, "promisc");
-        if (prom == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
-        cJSON_AddNumberToObject(prom, "mgmt_frames", (double)res->promisc.mgmt_frames);
-        cJSON_AddNumberToObject(prom, "data_frames", (double)res->promisc.data_frames);
-        cJSON_AddNumberToObject(prom, "probe_req_frames", (double)res->promisc.probe_req_frames);
-        cJSON_AddNumberToObject(prom, "deauth_frames", (double)res->promisc.deauth_frames);
-        cJSON_AddNumberToObject(prom, "eapol_frames", (double)res->promisc.eapol_frames);
-        cJSON_AddNumberToObject(prom, "pcap_frames", (double)res->promisc.pcap_captured_frames);
-        cJSON_AddNumberToObject(prom, "pcap_dropped", (double)res->promisc.pcap_dropped_frames);
-        cJSON_AddNumberToObject(prom, "pcap_bytes", (double)res->promisc.pcap_captured_bytes);
-
-        cJSON *probes_arr = cJSON_AddArrayToObject(prom, "probes");
-        cJSON *clients_arr = cJSON_AddArrayToObject(prom, "clients");
-        if (probes_arr == NULL || clients_arr == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
+        jbuf_printf(jb,
+                    ",\"promisc\":{\"mgmt_frames\":%" PRIu32 ",\"data_frames\":%" PRIu32 ","
+                    "\"probe_req_frames\":%" PRIu32 ",\"deauth_frames\":%" PRIu32 ","
+                    "\"eapol_frames\":%" PRIu32 ",\"pcap_frames\":%" PRIu32 ","
+                    "\"pcap_dropped\":%" PRIu32 ",\"pcap_bytes\":%" PRIu32 ",\"probes\":[",
+                    res->promisc.mgmt_frames, res->promisc.data_frames,
+                    res->promisc.probe_req_frames, res->promisc.deauth_frames,
+                    res->promisc.eapol_frames, res->promisc.pcap_captured_frames,
+                    res->promisc.pcap_dropped_frames, res->promisc.pcap_captured_bytes);
 
         for (uint16_t i = 0; i < res->promisc.num_probes; i++) {
-            const promisc_probe_t *pr = &res->promisc.probes[i];
-            cJSON *item = cJSON_CreateObject();
-            if (item == NULL) {
-                cJSON_Delete(root);
-                return NULL;
+            if (i > 0) {
+                jbuf_raw(jb, ",", 1);
             }
+            const promisc_probe_t *pr = &res->promisc.probes[i];
             char mac_str[18] = {0};
             bssid_to_str(pr->sta_mac, mac_str, sizeof(mac_str));
             char ssid_limpio[33];
@@ -303,107 +314,106 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
             size_t longitud = 0;
             bool sustituido = sanitizar_ssid(pr->ssid, ssid_limpio, ssid_hex, &longitud);
 
-            cJSON_AddStringToObject(item, "sta_mac", mac_str);
-            cJSON_AddStringToObject(item, "ssid", ssid_limpio);
+            jbuf_printf(jb, "{\"sta_mac\":\"%s\",\"ssid\":", mac_str);
+            jbuf_str(jb, ssid_limpio);
             if (sustituido) {
-                cJSON_AddStringToObject(item, "ssid_hex", ssid_hex);
+                jbuf_printf(jb, ",\"ssid_hex\":\"%s\"", ssid_hex);
             }
-            cJSON_AddNumberToObject(item, "rssi", pr->rssi);
-            cJSON_AddNumberToObject(item, "channel", pr->channel);
-            cJSON_AddNumberToObject(item, "count", pr->count);
+            jbuf_printf(jb, ",\"rssi\":%d,\"channel\":%u,\"count\":%u",
+                        (int)pr->rssi, (unsigned)pr->channel, (unsigned)pr->count);
             if (pr->pcap_flags != 0) {
-                add_pcap_traces_array(item, "pcap_traces", pr->pcap_flags);
+                emit_pcap_traces_array(jb, "pcap_traces", pr->pcap_flags);
             }
-            cJSON_AddItemToArray(probes_arr, item);
+            jbuf_raw(jb, "}", 1);
         }
 
+        jbuf_raw(jb, "],\"clients\":[", 13);
         for (uint16_t i = 0; i < res->promisc.num_clients; i++) {
-            const promisc_client_t *cl = &res->promisc.clients[i];
-            cJSON *item = cJSON_CreateObject();
-            if (item == NULL) {
-                cJSON_Delete(root);
-                return NULL;
+            if (i > 0) {
+                jbuf_raw(jb, ",", 1);
             }
+            const promisc_client_t *cl = &res->promisc.clients[i];
             char sta_str[18] = {0};
             char bssid_str[18] = {0};
             bssid_to_str(cl->sta_mac, sta_str, sizeof(sta_str));
             bssid_to_str(cl->bssid, bssid_str, sizeof(bssid_str));
 
-            cJSON_AddStringToObject(item, "sta_mac", sta_str);
-            cJSON_AddStringToObject(item, "bssid", bssid_str);
-            cJSON_AddNumberToObject(item, "rssi", cl->rssi);
-            cJSON_AddNumberToObject(item, "channel", cl->channel);
-            cJSON_AddNumberToObject(item, "frames", cl->frames);
+            jbuf_printf(jb,
+                        "{\"sta_mac\":\"%s\",\"bssid\":\"%s\",\"rssi\":%d,\"channel\":%u,\"frames\":%u",
+                        sta_str, bssid_str, (int)cl->rssi, (unsigned)cl->channel, (unsigned)cl->frames);
             if (cl->pcap_flags != 0) {
-                add_pcap_traces_array(item, "pcap_traces", cl->pcap_flags);
+                emit_pcap_traces_array(jb, "pcap_traces", cl->pcap_flags);
             }
-            cJSON_AddItemToArray(clients_arr, item);
+            jbuf_raw(jb, "}", 1);
         }
 
-        cJSON *ap_pcap_arr = cJSON_AddArrayToObject(prom, "ap_pcap");
-        if (ap_pcap_arr == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
+        jbuf_raw(jb, "],\"ap_pcap\":[", 13);
         for (uint16_t i = 0; i < res->promisc.num_ap_pcap; i++) {
-            const promisc_ap_pcap_t *ap = &res->promisc.ap_pcap[i];
-            cJSON *item = cJSON_CreateObject();
-            if (item == NULL) {
-                cJSON_Delete(root);
-                return NULL;
+            if (i > 0) {
+                jbuf_raw(jb, ",", 1);
             }
+            const promisc_ap_pcap_t *ap = &res->promisc.ap_pcap[i];
             char bssid_str[18] = {0};
             bssid_to_str(ap->bssid, bssid_str, sizeof(bssid_str));
-            cJSON_AddStringToObject(item, "bssid", bssid_str);
-            cJSON_AddNumberToObject(item, "pcap_frames", ap->pcap_frames);
-            add_pcap_traces_array(item, "pcap_traces", ap->pcap_flags);
-            cJSON_AddItemToArray(ap_pcap_arr, item);
+            jbuf_printf(jb, "{\"bssid\":\"%s\",\"pcap_frames\":%u",
+                        bssid_str, (unsigned)ap->pcap_frames);
+            emit_pcap_traces_array(jb, "pcap_traces", ap->pcap_flags);
+            jbuf_raw(jb, "}", 1);
         }
+        jbuf_raw(jb, "]}", 2);
     }
 
-    /* Bloque opcional "ble": resumen de la fusión BLE-Recon (P2). */
     if (res->ble.enabled) {
-        cJSON *ble = cJSON_AddObjectToObject(root, "ble");
-        if (ble == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
-        cJSON_AddNumberToObject(ble, "unique_devices", res->ble.unique_devices);
-        cJSON_AddNumberToObject(ble, "ibeacon", res->ble.ibeacon);
-        cJSON_AddNumberToObject(ble, "eddystone", res->ble.eddystone);
-        cJSON_AddNumberToObject(ble, "findmy_candidates", res->ble.findmy_candidates);
-        cJSON_AddNumberToObject(ble, "other", res->ble.other);
-        cJSON_AddNumberToObject(ble, "adv_frames", (double)res->ble.adv_frames);
+        jbuf_printf(jb,
+                    ",\"ble\":{\"unique_devices\":%u,\"ibeacon\":%u,\"eddystone\":%u,"
+                    "\"findmy_candidates\":%u,\"other\":%u,\"adv_frames\":%" PRIu32 ",\"devices\":[",
+                    (unsigned)res->ble.unique_devices, (unsigned)res->ble.ibeacon,
+                    (unsigned)res->ble.eddystone, (unsigned)res->ble.findmy_candidates,
+                    (unsigned)res->ble.other, res->ble.adv_frames);
 
-        cJSON *ble_devs = cJSON_AddArrayToObject(ble, "devices");
-        if (ble_devs == NULL) {
-            cJSON_Delete(root);
-            return NULL;
-        }
         for (uint16_t i = 0; i < res->ble.num_devices; i++) {
-            const ble_fusion_device_t *d = &res->ble.devices[i];
-            cJSON *item = cJSON_CreateObject();
-            if (item == NULL) {
-                cJSON_Delete(root);
-                return NULL;
+            if (i > 0) {
+                jbuf_raw(jb, ",", 1);
             }
+            const ble_fusion_device_t *d = &res->ble.devices[i];
             char mac_str[18] = {0};
             bssid_to_str(d->mac, mac_str, sizeof(mac_str));
-            cJSON_AddStringToObject(item, "mac", mac_str);
-            cJSON_AddStringToObject(item, "addr_type", ble_fusion_addr_type_str(d->addr_type));
-            cJSON_AddStringToObject(item, "type", ble_fusion_type_str(d->dev_type));
-            cJSON_AddNumberToObject(item, "rssi", d->rssi);
-            cJSON_AddNumberToObject(item, "count", d->count);
+            jbuf_printf(jb,
+                        "{\"mac\":\"%s\",\"addr_type\":\"%s\",\"type\":\"%s\",\"rssi\":%d,\"count\":%u",
+                        mac_str, ble_fusion_addr_type_str(d->addr_type),
+                        ble_fusion_type_str(d->dev_type), (int)d->rssi, (unsigned)d->count);
             if (d->name[0] != '\0') {
-                cJSON_AddStringToObject(item, "name", d->name);
+                jbuf_raw(jb, ",\"name\":", 8);
+                jbuf_str(jb, d->name);
             }
-            cJSON_AddItemToArray(ble_devs, item);
+            jbuf_raw(jb, "}", 1);
         }
+        jbuf_raw(jb, "]}", 2);
     }
 
-    char *linea = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return linea;
+    if (res->deauth_tx.frames > 0 || res->deauth_tx.bursts > 0 || res->deauth_tx.rejected > 0) {
+        jbuf_printf(jb,
+                    ",\"deauth_tx\":{\"frames\":%" PRIu32 ",\"bursts\":%" PRIu32 ",\"rejected\":%" PRIu32 "}",
+                    res->deauth_tx.frames, res->deauth_tx.bursts, res->deauth_tx.rejected);
+    }
+
+    jbuf_raw(jb, "}", 1);
+}
+
+char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
+{
+    jbuf_t jb = {.buf = NULL, .len = 0, .cap = 0};
+    emit_scan_json_v1(&jb, res, session_id);
+
+    /* +2 bytes de holgura para permitir añadir '\n' in-place en pusher sin reasignar. */
+    jb.cap = jb.len + 2;
+    jb.buf = malloc(jb.cap);
+    if (jb.buf == NULL) {
+        return NULL;
+    }
+    jb.len = 0;
+    emit_scan_json_v1(&jb, res, session_id);
+    return jb.buf;
 }
 
 /* -------- build_scan_json del baseline: SOLO para el modo A/B legacy ------ */

@@ -23,8 +23,10 @@ static const char *TAG = "WIFI_MGR";
 #define REINTENTO_CONEXION_MS 5000
 
 static volatile bool s_conectado = false;
+static volatile bool s_asociado = false;
 static volatile bool s_conectando = false;
 static volatile bool s_escaneando = false;
+static volatile bool s_primer_intento_resuelto = false;
 static volatile bool s_hay_bssid_propio = false;
 static uint8_t s_bssid_propio[6] = {0};
 static esp_ip4_addr_t s_ip_propia;
@@ -34,7 +36,7 @@ static TimerHandle_t s_timer_reintento = NULL;
 /* Reintento diferido: lo dispara el timer, no el handler de eventos. */
 static void cb_reintento(TimerHandle_t timer)
 {
-    if (s_escaneando || s_conectado) {
+    if (s_escaneando || s_conectado || s_conectando || s_asociado) {
         return;
     }
     ESP_LOGI(TAG, "Reintentando asociación al hotspot...");
@@ -51,14 +53,19 @@ static void manejador_eventos(void *arg, esp_event_base_t base, int32_t id, void
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
         const wifi_event_sta_connected_t *evt = (const wifi_event_sta_connected_t *)datos;
+        s_conectando = false;
+        s_asociado = true;
         if (evt != NULL) {
             memcpy(s_bssid_propio, evt->bssid, 6);
             s_hay_bssid_propio = true;
+            ESP_LOGI(TAG, "Asociado 802.11 (canal %u), esperando DHCP...", evt->channel);
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *evt = (const wifi_event_sta_disconnected_t *)datos;
         s_conectado = false;
+        s_asociado = false;
         s_conectando = false;
+        s_primer_intento_resuelto = true;
         if (!s_escaneando) {
             ESP_LOGW(TAG, "Desconectado (razón %d); reintento en %d ms",
                      evt ? evt->reason : -1, REINTENTO_CONEXION_MS);
@@ -73,6 +80,7 @@ static void manejador_eventos(void *arg, esp_event_base_t base, int32_t id, void
         s_gateway = evt->ip_info.gw;
         s_conectado = true;
         s_conectando = false;
+        s_primer_intento_resuelto = true;
         if (s_timer_reintento != NULL) {
             xTimerStop(s_timer_reintento, 0);
         }
@@ -159,8 +167,26 @@ bool wifi_mgr_is_connected(void)
     return s_conectado;
 }
 
+bool wifi_mgr_wait_initial_connect(uint32_t timeout_ms)
+{
+    uint32_t elapsed = 0;
+    const uint32_t step_ms = 50;
+    while (!s_conectado && !s_primer_intento_resuelto && elapsed < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(step_ms));
+        elapsed += step_ms;
+    }
+    return s_conectado;
+}
+
 void wifi_mgr_pause_connect_for_scan(void)
 {
+    /* Si hay una asociación o DHCP en curso, darle margen para terminar antes de abortar. */
+    uint32_t wait_ms = 0;
+    while ((s_conectando || (s_asociado && !s_conectado)) && wait_ms < 4500) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        wait_ms += 50;
+    }
+
     s_escaneando = true;
     if (s_timer_reintento != NULL) {
         xTimerStop(s_timer_reintento, 0);
@@ -174,8 +200,11 @@ void wifi_mgr_pause_connect_for_scan(void)
 void wifi_mgr_resume_connect_after_scan(void)
 {
     s_escaneando = false;
-    if (!s_conectado && !s_conectando && s_timer_reintento != NULL) {
-        xTimerStart(s_timer_reintento, 0);
+    if (!s_conectado && !s_conectando && !s_asociado) {
+        /* Reintentar inmediatamente tras el barrido para aprovechar la ventana entre escaneos. */
+        ESP_LOGI(TAG, "Reintentando asociación al hotspot tras escaneo...");
+        s_conectando = true;
+        esp_wifi_connect();
     }
 }
 

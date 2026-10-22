@@ -114,6 +114,51 @@ menu "Wardrive (sensor sigiloso)"
             embebida en cada payload JSONL. El conteo de dispositivos únicos
             del ciclo es independiente de este tope (caché de 96 direcciones).
 
+    config WARDRIVE_DEAUTH_ENABLE
+        bool "Red Team: envío CONTROLADO de tramas Deauth (opt-in, default NO)"
+        default n
+        help
+            ⚠️ SOLO para evaluaciones autorizadas (ROE firmadas). Activa el
+            módulo deauth_tx: canal de control UDP :47472 (token requerido)
+            para ordenar ráfagas de deautenticación dirigidas desde el CLI
+            (warwifi --deauth). Con esta opción en 'n' el sensor compila
+            100 % receive-only (stubs inertes). El sensor que envía deauths
+            es DETECTABLE por WIPS: úsalo solo donde esté autorizado.
+
+    config WARDRIVE_DEAUTH_TOKEN
+        string "Token compartido del canal de control deauth"
+        depends on WARDRIVE_DEAUTH_ENABLE
+        default ""
+        help
+            Token secreto compartido con el CLI (warwifi --deauth --token).
+            VACÍO = canal de control inactivo aunque el módulo esté compilado.
+            Configúralo por menuconfig: queda solo en sdkconfig (ignorado).
+
+    config WARDRIVE_DEAUTH_MAX_BURST
+        int "Tramas máximo por ráfaga deauth"
+        depends on WARDRIVE_DEAUTH_ENABLE
+        range 1 64
+        default 16
+        help
+            Límite duro de tramas por petición (el CLI puede pedir menos).
+
+    config WARDRIVE_DEAUTH_MIN_PERIOD_S
+        int "Período mínimo entre ráfagas (s)"
+        depends on WARDRIVE_DEAUTH_ENABLE
+        range 1 3600
+        default 10
+        help
+            Rate-limit entre ráfagas: protege contra abusos del canal.
+
+    config WARDRIVE_DEAUTH_MAX_TOTAL
+        int "Cuota total de tramas deauth por arranque"
+        depends on WARDRIVE_DEAUTH_ENABLE
+        range 1 65535
+        default 256
+        help
+            Cuota dura por sesión del sensor: al agotarse, rechaza todo hasta
+            reiniciar (trazabilidad y contención del impacto).
+
     config WARDRIVE_DEBUG_LEGACY_SCAN
         bool "DEBUG: conservar el bucle de escaneo ACTIVO del baseline"
         default n

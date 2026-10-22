@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 
 #include "jsonl_writer.h"
+#include "deauth_tx.h"
 #include "promisc.h"
 #include "pusher.h"
 #include "scan_store.h"
@@ -48,7 +49,12 @@ static bool escanear_pasivo(scan_result_t *res)
         .channel = 0, /* todos los canales (§3.3) */
         .show_hidden = true,
         .scan_type = WIFI_SCAN_TYPE_PASSIVE, /* 0 transmisiones propias */
+#if CONFIG_WARDRIVE_BLE_FUSION
+        /* Con BT/BLE activo, ESP-IDF exige scan_time.passive = 0 (default coex). */
+        .scan_time.passive = 0,
+#else
         .scan_time.passive = DWELL_PASIVO_MS,
+#endif
     };
 
     int64_t t_inicio = esp_timer_get_time();
@@ -68,15 +74,6 @@ static bool escanear_pasivo(scan_result_t *res)
         return false;
     }
 
-    /* Recoger hasta CONFIG_WARDRIVE_MAX_APS registros (§3.3). */
-    uint16_t leidos = (ap_num > CONFIG_WARDRIVE_MAX_APS)
-                          ? (uint16_t)CONFIG_WARDRIVE_MAX_APS
-                          : ap_num;
-    if (leidos > 0 && esp_wifi_scan_get_ap_records(&leidos, res->records) != ESP_OK) {
-        ESP_LOGE(TAG, "No se pudieron leer los registros de AP");
-        return false;
-    }
-
     /* Filtrado total del hotspot propio (§3.3): ni su BSSID ni su SSID aparecen jamás. */
     wifi_ap_record_t ap_propio;
     bool hay_propio_actual = (esp_wifi_sta_get_ap_info(&ap_propio) == ESP_OK);
@@ -86,25 +83,42 @@ static bool escanear_pasivo(scan_result_t *res)
 
     uint16_t almacenados = 0;
     uint16_t propios_filtrados = 0;
-    for (uint16_t i = 0; i < leidos; i++) {
+    for (uint16_t i = 0; i < ap_num; i++) {
+        wifi_ap_record_t rec;
+        if (esp_wifi_scan_get_ap_record(&rec) != ESP_OK) {
+            break;
+        }
         bool es_propio = false;
-        if (hay_propio_actual && memcmp(res->records[i].bssid, ap_propio.bssid, 6) == 0) {
+        if (hay_propio_actual && memcmp(rec.bssid, ap_propio.bssid, 6) == 0) {
             es_propio = true;
-        } else if (hay_propio_recordado && memcmp(res->records[i].bssid, bssid_recordado, 6) == 0) {
+        } else if (hay_propio_recordado && memcmp(rec.bssid, bssid_recordado, 6) == 0) {
             es_propio = true;
         } else if (ssid_propio[0] != '\0' &&
-                   strncmp((const char *)res->records[i].ssid, ssid_propio, 32) == 0) {
+                   strncmp((const char *)rec.ssid, ssid_propio, 32) == 0) {
             es_propio = true;
         }
         if (es_propio) {
             propios_filtrados++;
             continue;
         }
-        if (almacenados != i) {
-            res->records[almacenados] = res->records[i];
+        if (almacenados < CONFIG_WARDRIVE_MAX_APS) {
+            wardrive_ap_record_t *dst = &res->records[almacenados++];
+            memcpy(dst->bssid, rec.bssid, 6);
+            memcpy(dst->ssid, rec.ssid, 33);
+            dst->rssi = rec.rssi;
+            dst->primary = rec.primary;
+            dst->second = (uint8_t)rec.second;
+            dst->authmode = (uint8_t)rec.authmode;
+            dst->pairwise_cipher = (uint8_t)rec.pairwise_cipher;
+            dst->group_cipher = (uint8_t)rec.group_cipher;
+            dst->phy_11b = rec.phy_11b;
+            dst->phy_11g = rec.phy_11g;
+            dst->phy_11n = rec.phy_11n;
+            dst->phy_lr = rec.phy_lr;
+            dst->wps = rec.wps;
         }
-        almacenados++;
     }
+    esp_wifi_clear_ap_list();
 
     res->total_detected = (ap_num >= propios_filtrados) ? (ap_num - propios_filtrados) : 0;
     res->num_records = almacenados;
@@ -116,6 +130,7 @@ static bool escanear_pasivo(scan_result_t *res)
     res->buffered = false;  /* Fase 3: push */
     promisc_collect_and_reset(&res->promisc);
     ble_fusion_collect_and_reset(&res->ble);
+    deauth_tx_service(&res->deauth_tx);
 
     res->scan_id = session_next_scan_id();
     return true;
@@ -125,6 +140,9 @@ static void tarea_escaneo(void *pv)
 {
     ESP_LOGI(TAG, "Task de escaneo pasivo: ciclo %d ms, dwell %d ms/canal",
              CONFIG_WARDRIVE_SCAN_INTERVAL_MS, DWELL_PASIVO_MS);
+
+    /* Permitir que el primer intento de asociación al arranque concluya antes de barrer. */
+    wifi_mgr_wait_initial_connect(8000);
 
     TickType_t proximo_inicio = xTaskGetTickCount();
 

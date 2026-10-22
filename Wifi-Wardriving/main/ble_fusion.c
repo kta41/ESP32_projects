@@ -26,8 +26,8 @@
 
 static const char *TAG = "BLE_FUSION";
 
-#define BLE_SCAN_WINDOW_MS 60
-#define BLE_SCAN_ITVL_MS  60
+#define BLE_SCAN_WINDOW_MS 30
+#define BLE_SCAN_ITVL_MS   60
 #define MS_TO_SCAN_UNITS(ms) ((uint16_t)(((ms) * 1000) / 625))
 
 /* ------------------ Estado del ciclo (spinlock) ------------------ */
