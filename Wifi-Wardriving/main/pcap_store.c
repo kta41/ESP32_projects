@@ -28,7 +28,10 @@
 #endif
 
 #define PCAP_BUF_BYTES        ((size_t)CONFIG_WARDRIVE_PCAP_BUF_KB * 1024U)
+/* Reserva exclusiva de 4 KB para EAPOL + Assoc/Reassoc + Deauth (nunca pisada por Beacons/Probes). */
+#define EAPOL_RESERVE_BYTES   4096U
 #define MAX_BEACON_DEDUP      64
+#define MAX_AUTH_DEDUP        32
 
 /* Cabecera de registro PCAP estándar (16 bytes, little-endian). */
 typedef struct __attribute__((packed)) {
@@ -64,9 +67,11 @@ static uint8_t s_pcap_buf[PCAP_BUF_BYTES];
 static size_t s_pcap_used = 0;
 static uint32_t s_pcap_pkts = 0;
 
-/* Deduplicación de Beacons por BSSID dentro de un mismo ciclo de escaneo. */
+/* Deduplicación de Beacons/ProbeResp y Auth por BSSID dentro de un mismo ciclo. */
 static uint8_t s_beacon_bssids[MAX_BEACON_DEDUP][6];
 static uint16_t s_beacon_count = 0;
+static uint8_t s_auth_bssids[MAX_AUTH_DEDUP][6];
+static uint16_t s_auth_count = 0;
 
 /* Estadísticas del ciclo actual. */
 static pcap_cycle_stats_t s_cycle_stats;
@@ -115,9 +120,13 @@ static bool is_eapol_data_frame(const uint8_t *hdr, uint16_t len)
         mac_hdr_len += 6; /* WDS 4 direcciones */
     }
     if ((subtype & 0x08) != 0) {
+        uint8_t qos0 = (len > mac_hdr_len) ? hdr[mac_hdr_len] : 0;
         mac_hdr_len += 2; /* QoS Control */
         if ((fc1 & 0x80) != 0) {
             mac_hdr_len += 4; /* +HTC */
+        }
+        if ((qos0 & 0x80) != 0) {
+            mac_hdr_len += 14; /* Cabecera de subtrama A-MSDU (DA[6] + SA[6] + Len[2]) */
         }
     }
 
@@ -135,6 +144,7 @@ static bool is_eapol_data_frame(const uint8_t *hdr, uint16_t len)
 static bool should_keep_mgmt_locked(uint8_t subtype, const uint8_t *hdr)
 {
     switch (subtype) {
+        case 0x05:   /* Probe Response: deduplicar junto con Beacon (1 por BSSID/ciclo) */
         case 0x08: { /* Beacon: guardar como máximo 1 por BSSID (Addr3) en cada ciclo */
             const uint8_t *bssid = hdr + 16;
             for (uint16_t i = 0; i < s_beacon_count; i++) {
@@ -148,16 +158,26 @@ static bool should_keep_mgmt_locked(uint8_t subtype, const uint8_t *hdr)
             }
             return false;
         }
+        case 0x0B: { /* Authentication: evitar inundación por reintentos de un mismo BSSID */
+            const uint8_t *bssid = hdr + 16;
+            for (uint16_t i = 0; i < s_auth_count; i++) {
+                if (memcmp(s_auth_bssids[i], bssid, 6) == 0) {
+                    return false;
+                }
+            }
+            if (s_auth_count < MAX_AUTH_DEDUP) {
+                memcpy(s_auth_bssids[s_auth_count++], bssid, 6);
+                return true;
+            }
+            return false;
+        }
         case 0x00: /* Association Request */
         case 0x01: /* Association Response */
         case 0x02: /* Reassociation Request */
         case 0x03: /* Reassociation Response */
         case 0x04: /* Probe Request */
-        case 0x05: /* Probe Response */
         case 0x0A: /* Disassociation */
-        case 0x0B: /* Authentication */
         case 0x0C: /* Deauthentication */
-        case 0x0D: /* Action */
             return true;
         default:
             return false;
@@ -196,6 +216,7 @@ void pcap_store_init(void)
     s_pcap_used = 0;
     s_pcap_pkts = 0;
     s_beacon_count = 0;
+    s_auth_count = 0;
     memset(&s_cycle_stats, 0, sizeof(s_cycle_stats));
     portEXIT_CRITICAL(&s_pcap_lock);
 }
@@ -272,7 +293,11 @@ bool pcap_store_record_frame(const uint8_t *payload, uint16_t len,
         s_cycle_stats.eapol_frames++;
     }
 
-    if (s_pcap_used + total_rec_bytes > PCAP_BUF_BYTES) {
+    bool high_prio = is_eapol ||
+                     (trace_flag & (PCAP_TRACE_ASSOC | PCAP_TRACE_DEAUTH)) != 0;
+    size_t max_allowed = high_prio ? PCAP_BUF_BYTES : (PCAP_BUF_BYTES - EAPOL_RESERVE_BYTES);
+
+    if (s_pcap_used + total_rec_bytes > max_allowed) {
         s_cycle_stats.dropped_frames++;
         portEXIT_CRITICAL(&s_pcap_lock);
         return false;
@@ -303,7 +328,8 @@ void pcap_store_collect_cycle_stats(pcap_cycle_stats_t *out)
         *out = s_cycle_stats;
     }
     memset(&s_cycle_stats, 0, sizeof(s_cycle_stats));
-    s_beacon_count = 0; /* permitir 1 Beacon por BSSID en el nuevo ciclo */
+    s_beacon_count = 0; /* permitir 1 Beacon/ProbeResp por BSSID en el nuevo ciclo */
+    s_auth_count = 0;
     portEXIT_CRITICAL(&s_pcap_lock);
 }
 

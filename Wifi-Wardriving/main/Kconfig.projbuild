@@ -77,7 +77,7 @@ menu "Wardrive (sensor sigiloso)"
         int "Tamaño del buffer RAM para paquetes PCAP (KB)"
         depends on WARDRIVE_PCAP_ENABLE
         range 8 128
-        default 16
+        default 24
         help
             Capacidad estática en RAM reservada para encolar tramas PCAP
             entre envíos HTTP al listener.

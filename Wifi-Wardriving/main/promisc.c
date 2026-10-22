@@ -304,7 +304,10 @@ esp_err_t promisc_init(void)
     portEXIT_CRITICAL(&s_lock);
 
     wifi_promiscuous_filter_t filt = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA,
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT |
+                       WIFI_PROMIS_FILTER_MASK_DATA |
+                       WIFI_PROMIS_FILTER_MASK_DATA_MPDU |
+                       WIFI_PROMIS_FILTER_MASK_DATA_AMPDU,
     };
     esp_err_t err = esp_wifi_set_promiscuous_filter(&filt);
     if (err != ESP_OK) {
