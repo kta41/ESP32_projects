@@ -115,6 +115,7 @@ static bool escanear_pasivo(scan_result_t *res)
     res->lost_before = 0;   /* Fase 3: ring buffer */
     res->buffered = false;  /* Fase 3: push */
     promisc_collect_and_reset(&res->promisc);
+    ble_fusion_collect_and_reset(&res->ble);
 
     res->scan_id = session_next_scan_id();
     return true;
@@ -146,11 +147,12 @@ static void tarea_escaneo(void *pv)
             pusher_flush_pcap(s_result.scan_id, &rep.pcap_bytes_sent, &rep.pcap_pkts_sent);
 
             ESP_LOGI(TAG, "Escaneo #%" PRIu32 ": %u redes, %u clientes, %u probes, %" PRIu32 " deauth, %" PRIu32 " eapol (%" PRIu32 ".%" PRIu32 " s) | "
-                          "push: %s (%u B jsonl, %" PRIu32 " pkts/%u B pcap, %u pend) | heap=%lu B",
+                          "%u BLE unicos | push: %s (%u B jsonl, %" PRIu32 " pkts/%u B pcap, %u pend) | heap=%lu B",
                      s_result.scan_id, s_result.stored,
                      s_result.promisc.num_clients, s_result.promisc.num_probes,
                      s_result.promisc.deauth_frames, s_result.promisc.eapol_frames,
                      s_result.duration_ms / 1000, (s_result.duration_ms % 1000) / 100,
+                     s_result.ble.enabled ? s_result.ble.unique_devices : 0,
                      pusher_status_str(rep.status),
                      (unsigned)rep.bytes_sent,
                      rep.pcap_pkts_sent, (unsigned)rep.pcap_bytes_sent,

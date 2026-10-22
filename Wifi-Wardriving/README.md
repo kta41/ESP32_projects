@@ -19,6 +19,7 @@ Stealth passive & promiscuous 802.11 reconnaissance sensor built on **ESP-IDF v6
    - **Simultaneous promiscuous capture (`WIFI_PKT_MGMT | WIFI_PKT_DATA`)**: extracts associated client stations (`ToDS`/`FromDS` data frames + `Assoc`/`Reassoc`/`Auth` management frames), client `Probe Request` PNLs (searched SSIDs), and `Deauth`/`Disassoc` frame counters.
    - **Selective PCAP + Radiotap (`DLT_IEEE802_11_RADIO = 127`)**: buffers raw 802.11 management frames (1 Beacon per BSSID/cycle, Probe Req/Resp, Assoc/Reassoc, Auth, Deauth/Disassoc, Action) and **WPA/WPA2/WPA3 EAPOL handshakes** (`0x888E`) in RAM (`CONFIG_WARDRIVE_PCAP_BUF_KB`, default 32 KB) and streams them via `POST /pcap` to the phone, which writes standard `.pcap` files with UTC-rebased timestamps ready for Wireshark / `hcxpcapngtool` / `aircrack-ng`.
    - **Triple identity exclusion**: automatically strips the ESP32's own MAC, the active hotspot BSSID, the last remembered hotspot BSSID, and `CONFIG_WARDRIVE_WIFI_SSID` from AP lists, promiscuous tables, and `.pcap` captures.
+   - **BLE Fusion (`main/ble_fusion.c`, `main/ble_parser.c`, default on)**: a 100 % **passive** NimBLE observer (never transmits `SCAN_REQ`) runs concurrently with the Wi-Fi radio via software coexistence. Every scan cycle appends an optional `"ble"` block to the JSONL payload: unique devices seen, iBeacon / Eddystone / FindMy-candidate / other classification, ADV frame counters and the strongest devices table (MAC, type, RSSI). One sensor, one battery, one uplink — same `session_id` and clock for cross-protocol (Wi-Fi ↔ BLE) temporal correlation in SIGINT-Console.
 3. **RAM Ring Buffer (`main/scan_store.c`)**:
    - Pre-allocates `CONFIG_WARDRIVE_RING_SLOTS` (8 slots × 128 raw AP records in BSS) with zero flash writes.
    - Drops the oldest scan and increments the cumulative `lost_before` counter if the uplink stays down across more than 8 cycles.
@@ -114,11 +115,13 @@ On the phone (Termux / Kali NetHunter) or PC:
 
 ```bash
 warwifi                        # Starts live JSONL + PCAP radar collector on 0.0.0.0:47471
+warwifi --radar --name "Ruta" --gps   # Session name + per-scan GPS (10 s cache)
 warwifi --sync                 # Auto-discovers SIGINT-Console on port 47891 and pushes delta JSONL + PCAP
 warwifi --watch                # Waits in background for home Wi-Fi and auto-syncs to SIGINT-Console
 warwifi --status               # Shows local capture stats & SIGINT-Console connectivity
 warwifi --map                  # Prints the SIGINT audit report (APs + Clients + Probes + PCAP traces)
 warwifi --audit                # Deep PCAP Red Team triage (EAPOL M1-M4, PMKID, WPS, hc22000)
+warwifi --crack [--wordlist W] [--bssid B] [--show]  # Orchestrated offline cracking (hashcat/aircrack-ng) + evidence vault
 warwifi --check                # Validates integrity and continuity of all .jsonl files
 warwifi --pull                 # (PC) Pulls captures from phone via SSH/ADB and syncs to SIGINT-Console
 ```
@@ -146,6 +149,8 @@ idf.py menuconfig
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
+
+> **Note (2 MB modules):** BLE Fusion raises the binary above the default 1 MB `factory` app partition. The project ships a custom `partitions.csv` (enabled via `CONFIG_PARTITION_TABLE_CUSTOM` in `sdkconfig.defaults`) that allocates the whole 2 MB flash to the app. `idf.py flash` will also write the new partition table automatically.
 
 ---
 

@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "ble_fusion.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
 
@@ -88,6 +89,7 @@ typedef struct {
     uint16_t num_records;    /**< == stored. */
     wifi_ap_record_t records[CONFIG_WARDRIVE_MAX_APS];
     promisc_summary_t promisc; /**< Telemetría promiscua 802.11 del ciclo. */
+    ble_fusion_summary_t ble;  /**< Resumen BLE del ciclo (fusión BLE-Recon, P2). */
 } scan_result_t;
 
 /** @brief Crea el task de escaneo pasivo (llamar una vez desde app_main). */

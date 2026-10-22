@@ -1,3 +1,20 @@
 # Target del proyecto (sin secretos: los van a menuconfig → sdkconfig, ignorado)
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_WIFI_ENABLED=y
+
+# Fusión BLE (BLE-Recon integrado): host NimBLE solo-observador en coexistencia
+# con WiFi (ESP_COEX_SW_COEXIST_ENABLE es el nombre en IDF v6.1; el antiguo
+# CONFIG_SW_COEXIST_ENABLE se renombra automáticamente)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+CONFIG_WARDRIVE_BLE_FUSION=y
+
+# Particiones custom (2 MB de flash): factory ampliado para alojar NimBLE
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"

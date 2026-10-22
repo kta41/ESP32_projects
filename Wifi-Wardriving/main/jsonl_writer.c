@@ -361,6 +361,46 @@ char *build_scan_json_v1(const scan_result_t *res, const char *session_id)
         }
     }
 
+    /* Bloque opcional "ble": resumen de la fusión BLE-Recon (P2). */
+    if (res->ble.enabled) {
+        cJSON *ble = cJSON_AddObjectToObject(root, "ble");
+        if (ble == NULL) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+        cJSON_AddNumberToObject(ble, "unique_devices", res->ble.unique_devices);
+        cJSON_AddNumberToObject(ble, "ibeacon", res->ble.ibeacon);
+        cJSON_AddNumberToObject(ble, "eddystone", res->ble.eddystone);
+        cJSON_AddNumberToObject(ble, "findmy_candidates", res->ble.findmy_candidates);
+        cJSON_AddNumberToObject(ble, "other", res->ble.other);
+        cJSON_AddNumberToObject(ble, "adv_frames", (double)res->ble.adv_frames);
+
+        cJSON *ble_devs = cJSON_AddArrayToObject(ble, "devices");
+        if (ble_devs == NULL) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+        for (uint16_t i = 0; i < res->ble.num_devices; i++) {
+            const ble_fusion_device_t *d = &res->ble.devices[i];
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) {
+                cJSON_Delete(root);
+                return NULL;
+            }
+            char mac_str[18] = {0};
+            bssid_to_str(d->mac, mac_str, sizeof(mac_str));
+            cJSON_AddStringToObject(item, "mac", mac_str);
+            cJSON_AddStringToObject(item, "addr_type", ble_fusion_addr_type_str(d->addr_type));
+            cJSON_AddStringToObject(item, "type", ble_fusion_type_str(d->dev_type));
+            cJSON_AddNumberToObject(item, "rssi", d->rssi);
+            cJSON_AddNumberToObject(item, "count", d->count);
+            if (d->name[0] != '\0') {
+                cJSON_AddStringToObject(item, "name", d->name);
+            }
+            cJSON_AddItemToArray(ble_devs, item);
+        }
+    }
+
     char *linea = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return linea;

@@ -19,6 +19,3 @@ __pycache__/
 # VS Code
 .vscode/
 
-# Continue local configuration, profiles, skills, prompts, rules, MCP servers, and ignores
-.continue/
-.continueignore

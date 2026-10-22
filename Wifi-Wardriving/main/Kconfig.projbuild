@@ -91,6 +91,29 @@ menu "Wardrive (sensor sigiloso)"
             Trunca tramas superiores a este tamaño (512 B cubre holgadamente
             cualquier cabecera 802.11 + IEs de gestión y mensajes EAPOL M1-M4).
 
+    config WARDRIVE_BLE_FUSION
+        bool "Fusión BLE: escáner NimBLE pasivo simultáneo (BLE-Recon integrado)"
+        depends on BT_ENABLED && BT_NIMBLE_ENABLED
+        default y
+        help
+            Arranca un escaneo BLE continuo 100 % pasivo (nunca emite SCAN_REQ)
+            coexistente con el escaneo WiFi (requiere CONFIG_SW_COEXIST_ENABLE,
+            que se activa automáticamente con BT+WiFi). Cada ciclo de escaneo
+            añade al payload JSONL un bloque "ble" con dispositivos únicos,
+            clasificación iBeacon/Eddystone/FindMy/otros y la tabla de los
+            dispositivos más fuertes. Desactívalo si necesitas el RAM/heap
+            máximo para el buffer PCAP.
+
+    config WARDRIVE_MAX_BLE_DEVICES
+        int "Dispositivos BLE por ciclo en el payload JSONL"
+        depends on WARDRIVE_BLE_FUSION
+        range 8 64
+        default 24
+        help
+            Tamaño de la tabla de dispositivos BLE (los más fuertes por RSSI)
+            embebida en cada payload JSONL. El conteo de dispositivos únicos
+            del ciclo es independiente de este tope (caché de 96 direcciones).
+
     config WARDRIVE_DEBUG_LEGACY_SCAN
         bool "DEBUG: conservar el bucle de escaneo ACTIVO del baseline"
         default n

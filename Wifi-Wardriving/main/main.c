@@ -23,6 +23,7 @@
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
 
+#include "ble_fusion.h"
 #include "scanner.h"
 #include "session.h"
 #include "wifi_mgr.h"
@@ -191,6 +192,14 @@ void app_main(void)
 
     /* STA sigiloso: MAC aleatoria de sesión, TX mínimo y eventos (§3.2). */
     ESP_ERROR_CHECK(wifi_mgr_init());
+
+#if CONFIG_WARDRIVE_BLE_FUSION
+    /* Fusión BLE (P2): NimBLE + WiFi en coexistencia. No fatal: el sensor
+     * sigue operando solo con WiFi si el stack BT falla al arrancar. */
+    if (ble_fusion_init() != 0) {
+        ESP_LOGW(TAG, "Fusión BLE no iniciada: el sensor continúa en modo solo-WiFi");
+    }
+#endif
 
     /* Identidad de sesión (§3.4): session_id aleatorio por arranque. */
     session_init();
